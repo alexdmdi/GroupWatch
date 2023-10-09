@@ -1,0 +1,23 @@
+{
+  "name": "groupwatch",
+  "version": "1.0.0",
+  "description": "Watch Youtube videos with others in sync, and join in on the live chat",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev" : "tailwindcss -i ./src/input.css -o ./dist/output.css --watch" 
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexdmdi/GroupWatch.git"
+  },
+  "author": "alexdmdi",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alexdmdi/GroupWatch/issues"
+  },
+  "homepage": "https://github.com/alexdmdi/GroupWatch#readme",
+  "devDependencies": {
+    "tailwindcss": "^3.3.3"
+  }
+}
