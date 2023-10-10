@@ -8,16 +8,26 @@
     <!-- <link rel="icon" type="image/x-icon" href="/images/favicon.ico"> -->
     <title>GroupWatch</title>
 
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="output.css">
+    <link rel="stylesheet" href="/dist/styles.css">
+    <link rel="stylesheet" href="/dist/output.css">
     <!-- If you stop the project, do "npm run dev" to re-initiate live rebuild process for output.css file (runs the script set in package.json ) -->
 </head>
 
 
 
 <body class="text-white">
+    <nav class="flex justify-center bg-black">
+        <h1 class="text-3xl py-3 text-red-600">GroupTube</h1>
+    </nav>
+    <main class="px-16 py-20 lg:flex flex-wrap gap-10 content-center items-center place-content-evenly justify-evenly ">
+        <div class="order-first text-center bg-slate-800 px-20 py-5">Current Viewers</div>
+        <div class="text-center bg-slate-800">
+            <iframe width="864" height="486" src="https://www.youtube.com/embed/FQdaUv95mR8?si=RVtQTfZnfCb9HOCJ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+        </div>
 
-    <h1 class="text-4xl">GroupTube</h1>
+        <div class="order-last text-center bg-slate-800 px-20 py-5">Chat</div>
+
+    </main>
 
 
 </body>
