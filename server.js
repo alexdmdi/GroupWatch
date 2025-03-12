@@ -266,6 +266,7 @@ io.on('connection', (socket) => {
       // Remove the user from the global users list
       delete users[socket.id];
       console.log(`User with socket ID ${socket.id} has fully disconnected`);
+      console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)}`); //logs serverside
     });
   
   });
