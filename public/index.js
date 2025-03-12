@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let socketID = "";
     let localRoom = "";
     let isRoomLeader = false; 
-    let users = {}  //!maybe remove if implementing users obj from the room object?
+    let usersObj = {}  //!maybe remove if implementing users obj from the room object?
     
     const usernameForm = document.getElementById(`username-form`);
     const usernameInput = document.getElementById(`username-input`);
@@ -123,16 +123,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitVideoLinkButton = document.getElementById('submit-videolink');
     
     function renderUsersList() {
-        //clears the current list
+        // Ensure users is a valid object
+        if (!usersObj || typeof usersObj !== "object") {
+            console.log("Users list is not available or invalid.");
+            return;
+        }
+        
+        //Removes the hidden attribute for the users list element in index.html by clearing the styles applied
         userList.style = '';
+        
+        //clears the current list
         userList.innerHTML = '';
 
         //renders the new list of users
-        const socketIDs = Object.keys(users);
+        const socketIDs = Object.keys(usersObj);
         for (const socketID of socketIDs) {
-            if (users[socketID] !== ''){
+            if (usersObj[socketID] !== ''){
                 const userElement = document.createElement('div');
-                userElement.innerText = users[socketID]; // Display username
+                userElement.innerText = usersObj[socketID]; // Display username
                 userElement.id = socketID; // Set the element's ID to the users socket ID
                 userList.appendChild(userElement);
             }
@@ -178,9 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     
     socket.on('username-set', (usersObjFromServer) => {
-        users = usersObjFromServer;
+        console.log(`Users list is: ${JSON.stringify(usersObjFromServer)}`);
         renderUsersList();
-        console.log(`Users list is: ${JSON.stringify(users)}`);
     });
 
     
@@ -192,11 +199,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         console.log(`Creating Room...`);
         clientStatusMessage.innerText = "Trying to create a room..."
-        socket.emit('create-room', [username, socketID]);
+        socket.emit('create-room', {username, socketID});
         
     })
 
-    socket.on('created-room', ([roomID_fromServer, roomObj_fromServer]) => {
+    socket.on('created-room', ({roomID_fromServer, roomObj_fromServer}) => {
         localRoom = roomObj_fromServer;
 
         // console.log (`From Server: Room created with ID of ${localRoom.roomID}`);
@@ -226,17 +233,18 @@ document.addEventListener('DOMContentLoaded', () => {
             let roomJoinInput = document.getElementById('roomJoin-input');
             
             let joinRequestObj = {
-                "username": username,
-                "socketID": socketID,
-                "roomID": roomJoinInput.value
+                "req_username": username,
+                "req_socketID": socketID,
+                "req_roomID": roomJoinInput.value
             }
             console.log(`Sending join request obj to server with roomID set as: ${roomJoinInput.value}`);
             socket.emit('join-room', joinRequestObj);     
         
     })
 
-    socket.on('joined-room', (roomID_fromServer) => {
+    socket.on('joined-room', ({roomID_fromServer}) => {
         console.log(`Joined room with ID ${roomID_fromServer}`)
+        renderUsersList();
     });
 
     socket.on('room-join-fail', () => {
@@ -261,19 +269,27 @@ document.addEventListener('DOMContentLoaded', () => {
     
     //Listen for when someone else joins current room
     //-----------------------------------------------------------------------------------------------
-    socket.on('update-users-list', (usersInRoom) => {
-        // Update the local users object to match the server's data
-        users = usersInRoom;
-        console.log(`new users list is: ${JSON.stringify(users)}`);
+    socket.on('update-users-list', ({usersInRoom_fromServer}) => {
+        console.log('Received update-users-list event:', usersInRoom_fromServer);
+        
+        // Ensure the data is valid before updating the local `users` object to match server data
+        if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") {
+            usersObj = usersInRoom_fromServer;
+            console.log(`new users list is: ${JSON.stringify(usersObj)}`);
+            renderUsersList();
+        }
+        else {
+            console.log("Users list is not available or invalid");
+        }
+        
     
-        renderUsersList();
     });
 
 
     //Listen for when someone else leaves the room
     //-----------------------------------------------------------------------------------------------
-    socket.on('user-left', ({socketID, roomID}) => {
-        console.log(`User has left room ${roomID}`)
+    socket.on('user-left', ({socketID, roomID, username}) => {
+        console.log(`User ${username} with socket ID ${socketID} has left room ${roomID}`)
         renderUsersList();
     });
 
@@ -284,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.emit('user-disconnect', username);
     });
 
-    socket.on('user-disconnected', ([username, socketID]) => {
+    socket.on('user-disconnected', ({username, socketID}) => {
         const disconnectedUser = document.getElementById(socketID); 
         disconnectedUser.remove(); // removes element from left side user list
 

@@ -68,16 +68,16 @@ io.on('connection', (socket) => {
         };
 
         // Add the user to the room's users object
-        rooms[roomID].users[socket.id] = username;
+        rooms[roomID].users[socketID] = username;
 
         // Set the room leader
-        rooms[roomID].roomLeaders[socket.id] = username;
+        rooms[roomID].roomLeaders[socketID] = username;
 
         // Notify client that the room was created
-        socket.emit('created-room', [roomID, rooms[roomID]]); 
+        socket.emit('created-room', {roomID_fromServer: roomID, roomObj_fromServer: rooms[roomID]}); 
 
         // Send the updated users list to the room creator
-        io.to(socket.id).emit('update-users-list', rooms[roomID].users);
+        io.to(socketID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
 
         // Join the socket to the room
         socket.join(roomID);
@@ -96,13 +96,12 @@ io.on('connection', (socket) => {
 
     
     // Handles joining a room
-    socket.on('join-room', (joinReq_Obj) => {
-      const { req_socketID, req_roomID, req_username } = joinReq_Obj;
-      console.log(`Received join request from user: ${joinReq_Obj.username}, with socket ID: ${joinReq_Obj.socketID}, looking for room: ${joinReq_Obj.roomID}`)
+    socket.on('join-room', ({ req_socketID, req_roomID, req_username }) => {
+      console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
       
       // Validate inputs
       if (!req_socketID || !req_roomID || !req_username || !req_username.trim()) {
-        console.log(`Invalid join request: ${JSON.stringify(joinReq_Obj)}`);
+        console.log(`Invalid join request: ${JSON.stringify({ req_socketID, req_roomID, req_username })}`);
         socket.emit('room-join-fail');
         return;
     }
@@ -117,16 +116,17 @@ io.on('connection', (socket) => {
           // Increment user count
           rooms[req_roomID].userCount++;
 
-          // Notify all clients in the room that a new user has joined
-          socket.emit('joined-room', req_roomID);
-          
-          // Send the updated users list to all clients in the room
-          io.to(req_roomID).emit('update-users-list', rooms[req_roomID].users);
-
-          // Join the socket to the room
+          // Join the socket to the room - order matters here, should occur before emitting updates to clients
           socket.join(req_roomID);
 
-          // Server side logs
+          // Notify all clients in the room that a new user has joined
+          socket.emit('joined-room', {roomID_fromServer: req_roomID});
+          
+          // Send the updated users list to all users in the room
+          console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].users);
+          io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].users });
+          
+          //? Server side logs
           console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
           console.table(rooms);
 
@@ -155,6 +155,11 @@ io.on('connection', (socket) => {
               delete rooms[roomID];
           } else {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
+              // Ensure the `users` object is valid before emitting
+              if (rooms[roomID].users && typeof rooms[roomID].users === "object") {
+                io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
+              }
+              io.to(roomID).emit('user-left', { socketID, roomID });
           }
   
           // Notify other users in the room
@@ -229,7 +234,7 @@ io.on('connection', (socket) => {
           } else {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
               // Notify remaining users in the room
-              io.to(roomID).emit('update-users-list', rooms[roomID].users);
+              io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
               io.to(roomID).emit('user-left', { socketID, roomID });
           }
       } else {
@@ -253,7 +258,7 @@ io.on('connection', (socket) => {
                   delete rooms[roomID];
               } else {
                   // Notify remaining users in the room
-                  io.to(roomID).emit('update-users-list', rooms[roomID].users);
+                  io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
               }
           }
       }
