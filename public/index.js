@@ -28,7 +28,8 @@ function onYouTubeIframeAPIReady() {
 //For the player variable to be initialzed, or re-initialized when the selected video changes
 function initializePlayer() {
     //Destroys existing player if it exists
-    if (player){
+    if (player)
+    {
         player.destroy();  
         console.log('player object has been destroyed');
     }
@@ -60,22 +61,24 @@ function onPlayerStateChange(event) {
     console.log('Player state changed to:', event.data);
     console.log(`Current time: ${Math.floor(player.getCurrentTime())}`);
     
-    if (event.data === 1) {
-        socket.emit('set-videoTime', Math.floor(player.getCurrentTime()));   //!seems to be causing issue?
-        socket.emit('play-video', 'Video played');
+    if (event.data === 1) 
+    {
+        let currentTime = Math.floor(player.getCurrentTime());
+        socket.emit('set-videoTime', {currentTime, roomID});   //!seems to be causing issue?
+        socket.emit('play-video', {play_message:'Video played', roomID});
     }
     if (event.data === 2)
     {
         console.log('video paused by you');
-        socket.emit('pause-video', 'Video paused');
+        socket.emit('pause-video', {play_message: 'Video paused', roomID});
     }
     
 }
 
-//emits to to server when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
+// Emits to to server when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
 function onPlayerPlaybackRateChange(event) {
     console.log('Playback rate changed to:', event.data);  
-    socket.emit('set-playbackRate', event.data);
+    socket.emit('set-playbackRate', {playbackRate_eventData: event.data, roomID});
 }
 
 //2: The req contains an invalid parameter value. 
@@ -117,9 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const roomCreateForm = document.getElementById('roomCreate-form');
     const roomJoinForm = document.getElementById('roomJoin-form');
     
-    
     const clientStatusMessage = document.getElementById('client-status-message');
-    
+
     const leaveRoomButton = document.getElementById('leaveRoom-button');
 
     let videoLink = "";
@@ -130,7 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function renderUsersList() {
         // Ensure users is a valid object
-        if (!usersObj || typeof usersObj !== "object") {
+        if (!usersObj || typeof usersObj !== "object") 
+        {
             console.log("Users list is not available or invalid.");
             return;
         }
@@ -144,7 +147,8 @@ document.addEventListener('DOMContentLoaded', () => {
         //renders the new list of users
         const socketIDs = Object.keys(usersObj);
         for (const socketID of socketIDs) {
-            if (usersObj[socketID]){
+            if (usersObj[socketID])
+            {
                 const userElement = document.createElement('div');
                 userElement.innerText = usersObj[socketID]; // Display username
                 userElement.id = socketID; // Set the element's ID to the users socket ID
@@ -167,7 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
     //--------------------------------------------------------------------------------------
     usernameForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        if (usernameInput.value){         //!improve imput sanitization, don't allow code, spaces, or weird characters, max characters 20-25 
+        if (usernameInput.value) //!improve imput sanitization, don't allow code, spaces, or weird characters, max characters 20-25
+        {          
     
             username = usernameInput.value.trim();
             
@@ -193,7 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <button type="submit" id="joinRoom-button">Join</button>
             `
         }
-        else {
+        else 
+        {
             window.alert("Username cannot be empty!");
         }
 
@@ -220,9 +226,9 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('created-room', ({roomID_fromServer, roomObj_fromServer}) => {
         localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
-        console.log(`local roomID variable set as ${roomID} as a result of creating room`);
-
+        
         console.log (`From Server: Room created with ID of ${roomID_fromServer}`);
+        console.log(`local roomID variable set as ${roomID} as a result of creating room`);
         console.log(roomObj_fromServer);
 
         clientStatusMessage.remove();
@@ -248,7 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             let roomJoinInput = document.getElementById('roomJoin-input');
             
-            if (roomJoinInput.value){
+            if (roomJoinInput.value)
+            {
                 let joinRequestObj = {
                     "req_username": username,
                     "req_socketID": socketID,
@@ -258,7 +265,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 socket.emit('join-room', joinRequestObj);     
 
             }
-            else {
+            else 
+            {
                 window.alert("You cannot submit an empty form");
             }
         
@@ -293,14 +301,17 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     
     function leaveRoom() {
-        if (localRoomObj) {
+        if (localRoomObj) 
+        {
             console.log(`Leaving room: ${localRoomObj}`);
             socket.emit('user-leaves-room', { roomID, socketID });
             localRoomObj = null; // Clears the local room variable by setting to null
             roomID = null; //Clears the local roomID 
             renderUsersList(); // Clear the user list on the client side //!might be wrong
 
-        } else {
+        } 
+        else 
+        {
             console.log("You are not in a room.");
         }
     }
@@ -313,12 +324,14 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Received update-users-list event:', usersInRoom_fromServer);
         
         // Ensure the data is valid before updating the local `users` object to match server data
-        if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") {
+        if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") 
+        {
             usersObj = usersInRoom_fromServer;
             console.log(`new users list is: ${JSON.stringify(usersObj)}`);
             renderUsersList();
         }
-        else {
+        else 
+        {
             console.log("Users list is not available or invalid");
         }
         
@@ -330,7 +343,8 @@ document.addEventListener('DOMContentLoaded', () => {
     //--------------------------------------------------------------------------------------
     sendContainer.addEventListener('submit', (e) => {
         e.preventDefault();
-        if (messageInput.value.trim() && roomID && localRoomObj){
+        if (messageInput.value.trim() && roomID && localRoomObj)
+        {
             const message = `${messageInput.value.trim()}`;
             socket.emit('sendMessage', {message, username, roomID} ); // Send an obj containing the message, and roomID to the server
             messageInput.value = '';
@@ -341,7 +355,8 @@ document.addEventListener('DOMContentLoaded', () => {
     //("if connected" condition also enforced locally and server side)
     //--------------------------------------------------------------------------------------
     socket.on('message', (message) => {
-        if (roomID && localRoomObj) {
+        if (roomID && localRoomObj) 
+        {
             const messageElement = document.createElement('div');
             messageElement.innerText = message;
             messageContainer.appendChild(messageElement); // Display the received message on the page by appending it within 'messageContainer'
@@ -420,12 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
         videoLink = videoLinkInput.value; 
         let verifiedLink = verifyLink(videoLink)
         
-        if (verifiedLink) {
+        if (verifiedLink) 
+        {
             console.log(`verifiedLink is: ${verifiedLink}`);
             setVideo(verifiedLink);
-            socket.emit('videoLink-set', verifiedLink);
+            socket.emit('videoLink-set', {roomID, verifiedLink});
         }
-        else {
+        else 
+        {
             window.alert("Invalid link! Are you sure you entered a YouTube link?");
             console.warning("Setting video failed, link not good");
         }
@@ -441,25 +458,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('videoTime-set', (time_fromServer) => {
-    if (player && player.seekTo){
-        player.seekTo(time_fromServer);
-        console.log(`Playback time has been updated to: ${time_fromServer} seconds`);
-    }
-    else {
-        console.log("Player is not ready to seek");
-    }
+        if (player && player.seekTo)
+        {
+            player.seekTo(time_fromServer);
+            console.log(`Playback time has been updated to: ${time_fromServer} seconds`);
+        }
+        else 
+        {
+            console.log("Player is not ready to seek");
+        }
     });
 
     socket.on('video-paused', (pause_message) => {
         console.log(pause_message + ' by another user');
-        if (player && player.pauseVideo) {
+        if (player && player.pauseVideo) 
+        {
             player.pauseVideo();
         }
         else console.log('request from server to pause recieved but could not pause for some reason');
     });
 
     socket.on('video-played', (play_message) => {
-        if (player && player.playVideo()){
+        if (player && player.playVideo())
+        {
             player.playVideo();
         }
         else console.log('request from server to play recieved but could not play for some reason');
@@ -467,7 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('playbackRate-set', (rate_fromServer) => {
         console.log('playback rate set by another user');
-        if (player && player.setPlaybackRate){
+        if (player && player.setPlaybackRate)
+        {
             player.setPlaybackRate(rate_fromServer);
         }
     });
