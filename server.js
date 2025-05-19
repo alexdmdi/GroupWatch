@@ -35,7 +35,7 @@ let currentPlaybackRate = "";
 // Handles all socket connection requests from web clients
 io.on('connection', (socket) => {
     
-    console.log(`New user connected with ID of ${socket.id}`); //logs server side
+    console.log(`New connection with ID of ${socket.id}`); //logs server side
     io.to(socket.id).emit('on-connection', socket.id); // Send only the socket ID to the client
     
     // Handles a new user setting their username
@@ -46,7 +46,7 @@ io.on('connection', (socket) => {
       // io.emit('set-videoLink', currentVideoLink); // emits to client //! deal with this?
       }
       
-      console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)}`); //logs serverside
+      console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)} and ${rooms.length > 0? rooms.length : 0} room(s)`); //logs serverside
       // io.emit('username-set', users); //emits to client
 
     });
@@ -62,6 +62,7 @@ io.on('connection', (socket) => {
           users: {},
           userCount: 1,
           roomLeaders:  {},
+          messages: {},
           currentVideoLink: "",
           currentTime: 0,
           currentPlaybackRate: 1.0
@@ -120,7 +121,8 @@ io.on('connection', (socket) => {
           socket.join(req_roomID);
 
           // Notify all clients in the room that a new user has joined
-          socket.emit('joined-room', {roomID_fromServer: req_roomID});
+          socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
+          io.to(req_roomID).emit('message', `${req_username} has joined!`)
           
           // Send the updated users list to all users in the room
           console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].users);
@@ -164,16 +166,21 @@ io.on('connection', (socket) => {
   
           // Notify other users in the room
           socket.to(roomID).emit('user-left', [socketID, roomID, rooms[roomID].users[socket.id]]);
-      } else {
+
+          console.table(rooms); //console log server side
+      } 
+      
+      else {
           console.log(`Room with ID ${roomID} does not exist`);
       }
   });
 
-    // Handle sending and receiving messages
-    socket.on('sendMessage', (message) => {
-      console.log('Received message:', message);
-      io.emit('message', message); // Takes in message as input and then broadcasts the message to ALL users
+    //handles receiving then sending messages
+    socket.on('sendMessage', ({message, roomID: roomID_fromClient}) => {
+      console.log(`From room ${roomID_fromClient} - ${message}`);
+      io.to(roomID_fromClient).emit('message', message); // Takes in message as input and then broadcasts the message to all users in the given room
     });
+
 
     //handles when user sets the current video playing
     socket.on('videoLink-set', (videoLink_fromClient) => {
@@ -233,6 +240,7 @@ io.on('connection', (socket) => {
               delete rooms[roomID];
           } else {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
+              console.table(rooms);
               // Notify remaining users in the room
               io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
               io.to(roomID).emit('user-left', { socketID, roomID });
