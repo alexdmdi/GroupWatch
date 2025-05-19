@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let socketID = "";
     let isRoomLeader = false; 
 
-    let localRoom = ""; //room Obj containing inner users object, user count (int), roomLeaders object, messages object, current video link, currentTime, currentPlaybackRate
+    let localRoomObj = ""; //room Obj containing inner users object, user count (int), roomLeaders object, messages object, current video link, currentTime, currentPlaybackRate
     let usersObj = {}  
     let roomID;
     
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         //renders the new list of users
         const socketIDs = Object.keys(usersObj);
         for (const socketID of socketIDs) {
-            if (usersObj[socketID] !== ''){
+            if (usersObj[socketID]){
                 const userElement = document.createElement('div');
                 userElement.innerText = usersObj[socketID]; // Display username
                 userElement.id = socketID; // Set the element's ID to the users socket ID
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     //On connection
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     socket.on('on-connection', (socketID_fromServer) => { 
         console.log(`You have ID: ${socketID_fromServer} and have succesfully connected! Your username is not set yet`);
         socketID = socketID_fromServer; // Update the local socketID variable 
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     //Setting username
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     usernameForm.addEventListener('submit', (e) => {
         e.preventDefault();
         if (usernameInput.value){         //!improve imput sanitization, don't allow code, spaces, or weird characters, max characters 20-25 
@@ -207,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     
     //Creating a room
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     roomCreateForm.addEventListener('submit', (e) => {
         e.preventDefault();      
         
@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     })
 
     socket.on('created-room', ({roomID_fromServer, roomObj_fromServer}) => {
-        localRoom = roomObj_fromServer;
+        localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
         console.log(`local roomID variable set as ${roomID} as a result of creating room`);
 
@@ -243,12 +243,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     //Joining a room 
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     roomJoinForm.addEventListener('submit', (e) => {
             e.preventDefault();
             let roomJoinInput = document.getElementById('roomJoin-input');
             
-            if (roomJoinInput.value !== ''){
+            if (roomJoinInput.value){
                 let joinRequestObj = {
                     "req_username": username,
                     "req_socketID": socketID,
@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('joined-room', ({roomID_fromServer, roomObj_fromServer}) => {
         console.log(`Joined room with ID ${roomID_fromServer}`)
-        localRoom = roomObj_fromServer;
+        localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
         console.log(`local roomID variable set as ${roomID} as a result of joining room`);
 
@@ -286,17 +286,18 @@ document.addEventListener('DOMContentLoaded', () => {
     })
 
     //Client leaves the room but stays connected
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     leaveRoomButton.addEventListener('click', (e) => {
         e.preventDefault();
         leaveRoom();
     })
     
     function leaveRoom() {
-        if (localRoom) {
-            console.log(`Leaving room: ${localRoom}`);
+        if (localRoomObj) {
+            console.log(`Leaving room: ${localRoomObj}`);
             socket.emit('user-leaves-room', { roomID, socketID });
-            localRoom = ""; // Clear the local room variable
+            localRoomObj = null; // Clears the local room variable by setting to null
+            roomID = null; //Clears the local roomID 
             renderUsersList(); // Clear the user list on the client side //!might be wrong
 
         } else {
@@ -307,7 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     
     //Listen for when someone else joins current room
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     socket.on('update-users-list', ({usersInRoom_fromServer}) => {
         console.log('Received update-users-list event:', usersInRoom_fromServer);
         
@@ -324,26 +325,39 @@ document.addEventListener('DOMContentLoaded', () => {
     
     });
 
-    //Sending a message to everyone else
+    //Sending messages to everyone else in a room, if connected to one 
+    //("if connected" condition enforced by local verification paired with backup server verification)
+    //--------------------------------------------------------------------------------------
     sendContainer.addEventListener('submit', (e) => {
         e.preventDefault();
-        if (messageInput.value.trim()){
-            const message = `${username}: ${messageInput.value.trim()}`;
-            socket.emit('sendMessage', {message, roomID} ); // Send an obj containing the message, and roomID to the server
+        if (messageInput.value.trim() && roomID && localRoomObj){
+            const message = `${messageInput.value.trim()}`;
+            socket.emit('sendMessage', {message, username, roomID} ); // Send an obj containing the message, and roomID to the server
             messageInput.value = '';
         }
     });
     
-    //Listens for when a message is received    
+    //Listens for when a message is received, if connected to the/any room
+    //("if connected" condition also enforced locally and server side)
+    //--------------------------------------------------------------------------------------
     socket.on('message', (message) => {
-        const messageElement = document.createElement('div');
-        messageElement.innerText = message;
-        messageContainer.appendChild(messageElement); // Display the received message on the page by appending it within 'messageContainer'
+        if (roomID && localRoomObj) {
+            const messageElement = document.createElement('div');
+            messageElement.innerText = message;
+            messageContainer.appendChild(messageElement); // Display the received message on the page by appending it within 'messageContainer'
+        }
+    });
+
+    //Listens for 'error' events containing messages are emitted from the server
+    //--------------------------------------------------------------------------------------
+    socket.on('error', (errorMessage) => {
+        console.log(`Error from server: ${errorMessage}`);
+        alert(errorMessage); // Optionally show an alert to the user
     });
 
 
     //Listen for when someone else leaves the room
-    //-----------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     socket.on('user-left', ({socketID, roomID, username}) => {
         console.log(`User ${username} with socket ID ${socketID} has left room ${roomID}`)
         renderUsersList();
@@ -420,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     //Interacting through Youtube API once valid link is loaded
-    //----------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
     socket.on('set-videoLink', (videoLink_fromServer) => {
         videoLink = videoLink_fromServer;
         setVideo(videoLink);
@@ -457,7 +471,7 @@ document.addEventListener('DOMContentLoaded', () => {
             player.setPlaybackRate(rate_fromServer);
         }
     });
-    //----------------------------------------------------------------
+    //--------------------------------------------------------------------------------------
 
     
 

@@ -47,7 +47,7 @@ io.on('connection', (socket) => {
       }
       
       console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)} and ${rooms.length > 0? rooms.length : 0} room(s)`); //logs serverside
-      // io.emit('username-set', users); //emits to client
+      // io.emit('username-set', users); //emits global user list to client 
 
     });
 
@@ -59,7 +59,7 @@ io.on('connection', (socket) => {
       //!implement check if the person is not hosting a room currently, then allow
       if (!rooms.hasOwnProperty(roomID) && username && username.trim()!== "") {
         rooms[roomID] = {
-          users: {},
+          joined_users: {},
           userCount: 1,
           roomLeaders:  {},
           messages: {},
@@ -69,7 +69,7 @@ io.on('connection', (socket) => {
         };
 
         // Add the user to the room's users object
-        rooms[roomID].users[socketID] = username;
+        rooms[roomID].joined_users[socketID] = username;
 
         // Set the room leader
         rooms[roomID].roomLeaders[socketID] = username;
@@ -78,7 +78,7 @@ io.on('connection', (socket) => {
         socket.emit('created-room', {roomID_fromServer: roomID, roomObj_fromServer: rooms[roomID]}); 
 
         // Send the updated users list to the room creator
-        io.to(socketID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
+        io.to(socketID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
 
         // Join the socket to the room
         socket.join(roomID);
@@ -105,14 +105,14 @@ io.on('connection', (socket) => {
         console.log(`Invalid join request: ${JSON.stringify({ req_socketID, req_roomID, req_username })}`);
         socket.emit('room-join-fail');
         return;
-    }
+      }
       
       // Check if room exists
       if (rooms.hasOwnProperty(req_roomID)) {
           console.log(`User ${req_username} is joining room ${req_roomID}`);
           
           //Add user to the respective room objects inner user object
-          rooms[req_roomID].users[req_socketID] = req_username; 
+          rooms[req_roomID].joined_users[req_socketID] = req_username; 
           
           // Increment user count
           rooms[req_roomID].userCount++;
@@ -125,8 +125,8 @@ io.on('connection', (socket) => {
           io.to(req_roomID).emit('message', `${req_username} has joined!`)
           
           // Send the updated users list to all users in the room
-          console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].users);
-          io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].users });
+          console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
+          io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
           
           //? Server side logs
           console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
@@ -148,7 +148,7 @@ io.on('connection', (socket) => {
           console.log(`User with socket ID ${socketID} is leaving room ${roomID}`);
   
           // Remove the user from the room's users object
-          delete rooms[roomID].users[socketID];
+          delete rooms[roomID].joined_users[socketID];
           rooms[roomID].userCount--;
   
           // If the room is empty, delete it
@@ -158,14 +158,14 @@ io.on('connection', (socket) => {
           } else {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
               // Ensure the `users` object is valid before emitting
-              if (rooms[roomID].users && typeof rooms[roomID].users === "object") {
-                io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
+              if (rooms[roomID].joined_users && typeof rooms[roomID].joined_users === "object") {
+                io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
               }
               io.to(roomID).emit('user-left', { socketID, roomID });
           }
   
           // Notify other users in the room
-          socket.to(roomID).emit('user-left', [socketID, roomID, rooms[roomID].users[socket.id]]);
+          socket.to(roomID).emit('user-left', [socketID, roomID, rooms[roomID].joined_users[socket.id]]);
 
           console.table(rooms); //console log server side
       } 
@@ -176,9 +176,17 @@ io.on('connection', (socket) => {
   });
 
     //handles receiving then sending messages
-    socket.on('sendMessage', ({message, roomID: roomID_fromClient}) => {
-      console.log(`From room ${roomID_fromClient} - ${message}`);
-      io.to(roomID_fromClient).emit('message', message); // Takes in message as input and then broadcasts the message to all users in the given room
+    socket.on('sendMessage', ({message: message, username: username_fromClient, roomID: roomID_fromClient}) => {
+      //checks if the room exists and if user is currently joined in that room (socketIDs act as the key/properties in the joined_users inner object)
+      if ( rooms[roomID_fromClient] && (Object.hasOwn(rooms[roomID_fromClient].joined_users, socket.id))
+        ) {
+        console.log(`From room ${roomID_fromClient} - ${username_fromClient}: ${message}`);
+        io.to(roomID_fromClient).emit('message', `${username_fromClient}: ${message}`); // Broadcast received message to all users in the room
+      } 
+      else {
+        console.log(`Message from ${username_fromClient} providing a roomID of ${roomID_fromClient} rejected: Invalid room ID or user not in room.`);
+        socket.emit('error', 'Message could not be sent. Invalid room or user not in room.');
+      }
     });
 
 
@@ -231,7 +239,7 @@ io.on('connection', (socket) => {
           console.log(`User with socket ID ${socketID} is leaving room ${roomID}`);
 
           // Remove the user from the room's users object
-          delete rooms[roomID].users[socketID];
+          delete rooms[roomID].joined_users[socketID];
           rooms[roomID].userCount--;
 
           // If the room is empty, delete it
@@ -242,7 +250,7 @@ io.on('connection', (socket) => {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
               console.table(rooms);
               // Notify remaining users in the room
-              io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
+              io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
               io.to(roomID).emit('user-left', { socketID, roomID });
           }
       } else {
@@ -253,11 +261,11 @@ io.on('connection', (socket) => {
     // Handles user disconnecting fully (closing the tab / loses connection)
     socket.on('disconnect', () => {
       for (const roomID in rooms) {
-          if (rooms[roomID].users[socket.id]) {
-              console.log(`User ${rooms[roomID].users[socket.id]} disconnected from room ${roomID}`);
+          if (rooms[roomID].joined_users[socket.id]) {
+              console.log(`User ${rooms[roomID].joined_users[socket.id]} disconnected from room ${roomID}`);
   
               // Remove the user from the room's users list
-              delete rooms[roomID].users[socket.id];
+              delete rooms[roomID].joined_users[socket.id];
               rooms[roomID].userCount--;
   
               // If the room is empty, delete it
@@ -266,12 +274,12 @@ io.on('connection', (socket) => {
                   delete rooms[roomID];
               } else {
                   // Notify remaining users in the room
-                  io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].users });
+                  io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
               }
           }
       }
       
-      // Remove the user from the global users list
+      // Removes the user from the global users list
       delete users[socket.id];
       console.log(`User with socket ID ${socket.id} has fully disconnected`);
       console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)}`); //logs serverside
