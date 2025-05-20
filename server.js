@@ -67,6 +67,7 @@ io.on('connection', (socket) => {
           messages: {},
           currentVideoLink: "",
           currentTime: 0,
+          videoPaused: false,
           currentPlaybackRate: 1.0
         };
 
@@ -203,11 +204,11 @@ io.on('connection', (socket) => {
 
     // Handles when user sets the current video playing
     socket.on('videoLink-set', ({roomID : roomID_fromClient, verifiedLink: videoLink_fromClient}) => {
-      if (rooms[roomID])
+      if (rooms[roomID_fromClient])
       {
         rooms[roomID_fromClient].currentVideoLink = videoLink_fromClient;
-        io.to(roomID_fromClient).emit('set-videoLink', rooms[roomID_fromClient].currentVideoLink); //emit video link to all clients except the one who set the link
-        console.log(`Current video for room ${roomID} set to: ${rooms[roomID_fromClient].currentVideoLink}`);
+        socket.broadcast.to(roomID_fromClient).emit('set-videoLink', rooms[roomID_fromClient].currentVideoLink); //emit video link to all clients except the one who set the link
+        console.log(`Current video for room ${roomID_fromClient} set to: ${rooms[roomID_fromClient].currentVideoLink}`);
       }
       else {
         socket.emit('error', `You tried to set the link to ${videoLink_fromClient} with invalid room ID of ${roomID_fromClient}`)
@@ -233,21 +234,21 @@ io.on('connection', (socket) => {
     
 
     // Handles when user plays the current video playing
-    socket.on('play-video', ({play_message, roomID : roomID_fromClient}) => {
+    socket.on('play-video', ({play_message : play_message, roomID : roomID_fromClient}) => {
       console.log(play_message);
       socket.to(roomID_fromClient).emit('video-played', 'Video played');
     });
 
     // Handles when user pauses the current video playing
-    socket.on('pause-video', ({pause_message, roomID}) => {
+    socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => {
       console.log(pause_message);
       socket.to(roomID_fromClient).emit('video-paused', 'Video paused');
     });
 
     // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
-    socket.on('set-playbackRate', ({playbackRate_eventData: rate_fromClient, roomID : roomID_fromClient}) => {
-      console.log(`player playback rate set to: ${rate_fromClient}`);
-      currentPlaybackRate = rate_fromClient;
+    socket.on('set-playbackRate', ({playbackRate_eventData: playbackRate_fromClient, roomID : roomID_fromClient}) => {
+      console.log(`player playback rate set to: ${playbackRate_fromClient}`);
+      currentPlaybackRate = playbackRate_fromClient;
       socket.to(roomID_fromClient).emit('playbackRate-set', currentPlaybackRate);
     });
 

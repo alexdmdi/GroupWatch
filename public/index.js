@@ -1,6 +1,14 @@
 // import {io} from 'socket.io-client';
 const socket = io('http://localhost:3000'); //Initialize socket.io client
 
+// Global variables
+let username = "";
+let socketID = "";
+let isRoomLeader = false; 
+let localRoomObj = ""; //room Obj containing inner users object, user count (int), roomLeaders object, messages object, current video link, currentTime, currentPlaybackRate
+let usersObj = {}  
+let roomID;
+
 //------------YT API MUST BE IN GLOBAL SCOPE AS IS DONE HERE, NOT WITHIN `DOMContentLoaded`---------//
 // 1. Load the YouTube IFrame Player API code asynchronously
 let tag = document.createElement('script');
@@ -61,13 +69,13 @@ function onPlayerStateChange(event) {
     console.log('Player state changed to:', event.data);
     console.log(`Current time: ${Math.floor(player.getCurrentTime())}`);
     
-    if (event.data === 1) 
+    if (event.data === 1 && isRoomLeader) 
     {
         let currentTime = Math.floor(player.getCurrentTime());
         socket.emit('set-videoTime', {currentTime, roomID});   //!seems to be causing issue?
         socket.emit('play-video', {play_message:'Video played', roomID});
     }
-    if (event.data === 2)
+    if (event.data === 2 && isRoomLeader)
     {
         console.log('video paused by you');
         socket.emit('pause-video', {play_message: 'Video paused', roomID});
@@ -77,8 +85,11 @@ function onPlayerStateChange(event) {
 
 // Emits to to server when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
 function onPlayerPlaybackRateChange(event) {
-    console.log('Playback rate changed to:', event.data);  
-    socket.emit('set-playbackRate', {playbackRate_eventData: event.data, roomID});
+    if (isRoomLeader) 
+    {
+        console.log('Playback rate changed to:', event.data);  
+        socket.emit('set-playbackRate', {playbackRate_eventData: event.data, roomID});
+    }
 }
 
 //2: The req contains an invalid parameter value. 
@@ -94,14 +105,6 @@ function onPlayerError(event) {
 
 //--------------------------------------------------------------------------------------------------------------------//
 document.addEventListener('DOMContentLoaded', () => {
-
-    let username = "";
-    let socketID = "";
-    let isRoomLeader = false; 
-
-    let localRoomObj = ""; //room Obj containing inner users object, user count (int), roomLeaders object, messages object, current video link, currentTime, currentPlaybackRate
-    let usersObj = {}  
-    let roomID;
     
     const usernameForm = document.getElementById(`username-form`);
     const usernameInput = document.getElementById(`username-input`);
@@ -110,8 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const nonEmbedLinkRegex = /^(https?:\/\/)?(www\.)?youtube\.com\/watch\?v=([^&]+)/; //for yt video URLs that follow pattern: https://www.youtube.com/watch?v=ID or www.youtube.com/watch?v=ID  -- double check these comments
     const embedLinkRegex = /^(https:\/\/)?(www\.)?youtube\.com\/embed\/.+$/;           //for yt video URLs that follow pattern: https://www.youtube.com/embed/ID
     const wwwEmbedLinkRegex = /^www\.youtube\.com\/embed\/([^&]+)/;                    //for yt video URLs that follow pattern: www.youtube.com/embed/ID
-
-    // let messages = {}; //!to implement potentially
+    
+    // let messages = {}; //!to implement potentially, meant to enable the loading of prior chat when someone joins late 
     const rightColumn = document.getElementById('right-col');
     const messageContainer = document.getElementById('message-container');
     const sendContainer = document.getElementById('send-container');
@@ -186,8 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             videoLinkInput.removeAttribute('disabled');
             videoLinkInput.removeAttribute('placeholder');
-            
-            // submitVideoLinkButton.removeAttribute('disabled')
 
             roomCreateForm.innerHTML = ` 
             <button type = "submit" id="submit-roomCreate" style="display: block; margin-bottom: 10%">Create a private room</button>
@@ -226,6 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('created-room', ({roomID_fromServer, roomObj_fromServer}) => {
         localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
+        isRoomLeader = true; //sets boolean to true as the creator of the room
         
         console.log (`From Server: Room created with ID of ${roomID_fromServer}`);
         console.log(`local roomID variable set as ${roomID} as a result of creating room`);
@@ -235,6 +237,8 @@ document.addEventListener('DOMContentLoaded', () => {
         videoLinkForm.style="display: inline;"
         roomCreateForm.innerHTML = "";
         roomJoinForm.innerHTML = "";
+
+        submitVideoLinkButton.removeAttribute('disabled')
 
         rightColumn.style = "visibility: visible;"; //reveals the elements in the right column (chat)
         renderUsersList();
@@ -285,6 +289,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         rightColumn.style = "visibility: visible;"; //reveals the elements in the right column (chat)
         renderUsersList();
+        
+        setVideo(localRoomObj.currentVideoLink);
+        player.seekTo(time_fromServer);
+        if (localRoomObj.videoPaused === true)
+        {
+            player.pauseVideo;
+        }
 
     });
 
@@ -429,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    //How a client sets the video from their side
+    // Handles client setting the video from their side
     videoLinkForm.addEventListener('submit', (e) => {
         e.preventDefault();
         videoLink = videoLinkInput.value; 
@@ -450,7 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    //Interacting through Youtube API once valid link is loaded
+    // Interacting through Youtube API once valid link is loaded
     //--------------------------------------------------------------------------------------
     socket.on('set-videoLink', (videoLink_fromServer) => {
         videoLink = videoLink_fromServer;
@@ -471,9 +482,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('video-paused', (pause_message) => {
         console.log(pause_message + ' by another user');
-        if (player && player.pauseVideo) 
+        
+        //checks if the player is there, and the api/function to pauseVideo is also available
+        if (player && player.pauseVideo)
         {
             player.pauseVideo();
+            localRoomObj.videoPaused = true;
         }
         else console.log('request from server to pause recieved but could not pause for some reason');
     });
