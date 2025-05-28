@@ -148,47 +148,6 @@ io.on('connection', (socket) => {
     });
 
 
-    //! leave-room 
-    socket.on('leave-room', ({ roomID, socketID }) => {
-      // Check if the room exists
-      if (rooms[roomID]) 
-      {
-          console.log(`User with socket ID ${socketID} is leaving room ${roomID}`);
-  
-          // Remove the user from the room's users object
-          delete rooms[roomID].joined_users[socketID];
-          rooms[roomID].userCount--;
-  
-          // If the room is empty, delete it
-          if (rooms[roomID].userCount === 0) 
-            {
-              console.log(`Room ${roomID} is now empty and will be deleted`);
-              delete rooms[roomID];
-          } 
-          else 
-          {
-              console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
-              // Ensure the `users` object is valid before emitting
-              if (rooms[roomID].joined_users && typeof rooms[roomID].joined_users === "object") 
-              {
-                io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
-              }
-              io.to(roomID).emit('user-left', { socketID, roomID });
-          }
-  
-          // Notify other users in the room
-          socket.to(roomID).emit('user-left', [socketID, roomID, rooms[roomID].joined_users[socket.id]]);
-
-          socket.leave(roomID); //at first socket.join is done to connect to the room, now this disconnects the user/client from the room
-
-          console.table(rooms); // console log server side
-      } 
-      
-      else 
-      {
-          console.log(`Room with ID ${roomID} does not exist`);
-      }
-    });
 
     // Handles receiving then sending messages
     socket.on('sendMessage', ({message: message, username: username_fromClient, roomID: roomID_fromClient}) => {
