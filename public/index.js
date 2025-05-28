@@ -1,5 +1,19 @@
+"use strict";
+
 // import {io} from 'socket.io-client';
 const socket = io('http://localhost:3000'); //Initialize socket.io client
+
+//!client side debug functions--------------------------
+
+    function printStatus() {
+        console.log(`Username: ${username}`);
+        console.log(`Is room leader: ${isRoomLeader}`);
+        console.log(`SocketID: ${socketID}`);
+        console.log(`roomID: ${roomID}`);
+        
+    }
+//!-----------------------------------------------------
+
 
 // Global variables
 let username = "";
@@ -287,6 +301,8 @@ document.addEventListener('DOMContentLoaded', () => {
         roomCreateForm.innerHTML = "";
         roomJoinForm.innerHTML = "";
 
+        submitVideoLinkButton.removeAttribute('disabled')
+
         rightColumn.style = "visibility: visible;"; //reveals the elements in the right column (chat)
         renderUsersList();
         
@@ -304,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clientStatusMessage.innerText = "A room with this ID does not exist"
     })
 
-    //Client leaves the room but stays connected
+    //Client leaves the room but stays connected to the general server/site
     //--------------------------------------------------------------------------------------
     leaveRoomButton.addEventListener('click', (e) => {
         e.preventDefault();
@@ -312,13 +328,13 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     
     function leaveRoom() {
-        if (localRoomObj) 
+        if (localRoomObj && roomID) 
         {
             console.log(`Leaving room: ${localRoomObj}`);
             socket.emit('user-leaves-room', { roomID, socketID });
             localRoomObj = null; // Clears the local room variable by setting to null
             roomID = null; //Clears the local roomID 
-            renderUsersList(); // Clear the user list on the client side //!might be wrong
+            renderUsersList(); // Clear the user list on the client side //!might be wrong? or remove when changing html design
 
         } 
         else 
@@ -430,13 +446,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setVideo(link) {
+        if (username && roomID)
+        {
             console.log(`The link was set to: ${link}`)
             videoWrapper.innerHTML = '';
             ++videoNumber;
             videoWrapper.innerHTML = `<iframe id="yt-iframe" width="640" height="360" src="${link}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
             videoLinkInput.value = '';
-            // initializePlayer(); //Reinitialize the player with the new video
+            // initializePlayer(); //Reinitialize the player with the new video without small delay - keep commented or delete later
             setTimeout(initializePlayer, 500); // Re-initialize the player with the newly set video, but with a delay to ensure the iframe is fully loaded
+        }    
+    
     }
 
 
@@ -448,9 +468,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (verifiedLink) 
         {
-            console.log(`verifiedLink is: ${verifiedLink}`);
-            setVideo(verifiedLink);
-            socket.emit('videoLink-set', {roomID, verifiedLink});
+            if (isRoomLeader)
+            {
+                console.log(`verifiedLink is: ${verifiedLink}`);
+                setVideo(verifiedLink);
+                socket.emit('videoLink-set', {roomID, verifiedLink});
+            }
+            else 
+            {
+                window.alert("Only room leaders can set or control the video player!");
+            }
+            
         }
         else 
         {
@@ -461,7 +489,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    // Interacting through Youtube API once valid link is loaded
+    // Receiving and handling video player updates from room leaders 
+    // Interactions are done through Youtube API once a valid link is loaded
     //--------------------------------------------------------------------------------------
     socket.on('set-videoLink', (videoLink_fromServer) => {
         videoLink = videoLink_fromServer;
@@ -469,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('videoTime-set', (time_fromServer) => {
-        if (player && player.seekTo)
+        if (player && player.seekTo && roomID)
         {
             player.seekTo(time_fromServer);
             console.log(`Playback time has been updated to: ${time_fromServer} seconds`);
@@ -483,8 +512,8 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('video-paused', (pause_message) => {
         console.log(pause_message + ' by another user');
         
-        //checks if the player is there, and the api/function to pauseVideo is also available
-        if (player && player.pauseVideo)
+        //checks if the player and the videoPaused api/function are ready and available
+        if (player && player.pauseVideo && roomID)
         {
             player.pauseVideo();
             localRoomObj.videoPaused = true;
@@ -493,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('video-played', (play_message) => {
-        if (player && player.playVideo())
+        if (player && player.playVideo() && roomID)
         {
             player.playVideo();
         }
@@ -502,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('playbackRate-set', (rate_fromServer) => {
         console.log('playback rate set by another user');
-        if (player && player.setPlaybackRate)
+        if (player && player.setPlaybackRate && roomID)
         {
             player.setPlaybackRate(rate_fromServer);
         }
