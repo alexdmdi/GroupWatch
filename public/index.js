@@ -331,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (localRoomObj && roomID) 
         {
             console.log(`Leaving room: ${localRoomObj}`);
-            socket.emit('user-leaves-room', { roomID, socketID });
+            socket.emit('user-leaves-room', {roomID} );
             localRoomObj = null; // Clears the local room variable by setting to null
             roomID = null; //Clears the local roomID 
             renderUsersList(); // Clear the user list on the client side //!might be wrong? or remove when changing html design
