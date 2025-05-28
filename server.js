@@ -5,6 +5,8 @@
 // 4) The server listens for 'sendMessage' events from the clients, and when a message is received, it broadcasts the message to all clients to make the real-time chat function as expected
 // -----------------------------------------------------------------------------------------------------------------------
 
+"use strict";
+
 const express = require('express');    // This imports the Express library
 const http = require('http');          // Creates an HTTP server using Express. This is needed because Socket.IO works with HTTP server to enable WebSocket communication
 const socketIo = require('socket.io'); // Imports socketIO for handling real-time bidirectional communication between the client and server, like for a live chat in this case
@@ -48,8 +50,6 @@ io.on('connection', (socket) => {
       }
       
       console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)} and ${Object.keys(rooms).length} room(s)`); //logs serverside
-      // io.emit('username-set', users); //emits global user list to client 
-
     });
 
     // Handles room creation
@@ -160,13 +160,17 @@ io.on('connection', (socket) => {
           rooms[roomID].userCount--;
   
           // If the room is empty, delete it
-          if (rooms[roomID].userCount === 0) {
+          if (rooms[roomID].userCount === 0) 
+            {
               console.log(`Room ${roomID} is now empty and will be deleted`);
               delete rooms[roomID];
-          } else {
+          } 
+          else 
+          {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
               // Ensure the `users` object is valid before emitting
-              if (rooms[roomID].joined_users && typeof rooms[roomID].joined_users === "object") {
+              if (rooms[roomID].joined_users && typeof rooms[roomID].joined_users === "object") 
+              {
                 io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
               }
               io.to(roomID).emit('user-left', { socketID, roomID });
@@ -174,6 +178,8 @@ io.on('connection', (socket) => {
   
           // Notify other users in the room
           socket.to(roomID).emit('user-left', [socketID, roomID, rooms[roomID].joined_users[socket.id]]);
+
+          socket.leave(roomID); //at first socket.join is done to connect to the room, now this disconnects the user/client from the room
 
           console.table(rooms); // console log server side
       } 
@@ -272,9 +278,12 @@ io.on('connection', (socket) => {
           {
               console.log(`Updated room: ${JSON.stringify(rooms[roomID])}`);
               console.table(rooms);
+
               // Notify remaining users in the room
               io.to(roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[roomID].joined_users });
               io.to(roomID).emit('user-left', { socketID, roomID });
+
+              socket.leave(roomID); //at first socket.join is done to connect to the room, now this disconnects the user/client from the room
           }
       } 
       else 
