@@ -34,8 +34,9 @@ app.get(`/`, (req, res) => {
 })
 
 // Global Variables, initialized as empty
-const rooms = {}; // Room-specific object containing data and more object(s)
+const rooms = {}; // Room-specific global object containing data and more object(s)
 const users = {}; //! Global list of all users with expected format of {"socketID" : [username, true/false]}? to keep track of if they are in a room or not
+const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. //! should be integrated with setvideo time and maybe other event handlers?
 
 
 // Helper function used in socket.on('disconnect') and socket.on('user-leaves-room').
@@ -99,16 +100,16 @@ const users = {}; //! Global list of all users with expected format of {"socketI
 // Handles all socket connection requests from web clients
 io.on('connection', (socket) => {
     
-    console.log(`New connection with ID of ${socket.id}`); //logs server side
+    console.log(`New connection with ID: ${socket.id}`); //logs server side
     io.to(socket.id).emit('on-connection', socket.id); // Send only the socket ID to the client
     
-    // Handles a new user setting their username
+    // Handles a new user setting their username //! make more robust with uniqueness? or perhaps not needed if unique background ID handles it (currently socket.id's)
     socket.on('new-user', (username) => {
       if (username && username.trim() !== "")
       {
         users[socket.id] = username; // Add user to the global users list
+        socket.emit('username-set', {username: users[socket.id]});
         console.log(`User ${username} connected with socket ID: ${socket.id}`);
-      // io.emit('set-videoLink', currentVideoLink); // emits to client //! deal with this?
       }
       
       console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)} and ${Object.keys(rooms).length} room(s)`); //logs serverside
@@ -243,33 +244,41 @@ io.on('connection', (socket) => {
     });
 
 
-    // Handles when user changes video time
-    const rateLimit = {};
-    io.use( (socket, next) => {
-      socket.on('set-videoTime', ({currentTime: time_fromClient, roomID: roomID_fromClient}) => {
+    // Handles when user changes video time. Implements rate limiting involving the global 'videoTimeUpdateRateLimit' object
+    socket.on('set-videoTime', ({currentTime: time_fromClient, roomID: roomID_fromClient}) => {
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders[socket.id]){
         const now = Date.now();
-        if (!rateLimit[socket.id] || now - rateLimit[socket.id] > 1000)
-        {
-          rateLimit[socket.id] = now;
+        const socketRateLimit = videoTimeUpdateRateLimit[socket.id] // Use the global rateLimit object
+
+        if (!socketRateLimit || now - socketRateLimit > 250) { // 0.25 second rate limit
+          videoTimeUpdateRateLimit[socket.id] = now;
           rooms[roomID_fromClient].currentTime = time_fromClient;
-          console.log(`Current time updated to: ${rooms[roomID_fromClient].currentTime}`);
-          socket.to(roomID_fromClient).emit('videoTime-set', rooms[roomID_fromClient].currentTime)
+          
+          console.log(`Room ${roomID_fromClient}: Video time updated to: ${rooms[roomID_fromClient].currentTime} by ${users[socket.id]}`);
+          socket.to(roomID_fromClient).emit('videoTime-set', rooms[roomID_fromClient].currentTime+1); //add 1 second to make up for the slight typical buffer delay, improving synchronization
         }
-      });
-      next();
+        else {
+          // Optional: log rate limit hit, but can be noisy
+          // console.log(`Rate limit hit for set-videoTime by ${socket.id} in room ${roomID_fromClient}`);
+        }
+      }
+      else {
+        socket.emit('error', 'You are not a leader or the room is invalid. Cannot set video time.');
+        console.log(`Failed set-videoTime attempt by ${socket.id} for room ${roomID_fromClient}. Leader: ${!!(rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders[socket.id])}`);
+      }
     });
     
 
     // Handles when user plays the current video playing
     socket.on('play-video', ({play_message : play_message, roomID : roomID_fromClient}) => {
       console.log(play_message);
-      socket.to(roomID_fromClient).emit('video-played', 'Video played');
+      socket.to(roomID_fromClient).emit('video-played', 'Video played by room leader');
     });
 
     // Handles when user pauses the current video playing
     socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => {
       console.log(pause_message);
-      socket.to(roomID_fromClient).emit('video-paused', 'Video paused');
+      socket.to(roomID_fromClient).emit('video-paused', 'Video paused by a room leader');
     });
 
     // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
@@ -344,6 +353,7 @@ io.on('connection', (socket) => {
   
   });
 
+//! Only for dev environment
 const PORT = process.env.PORT || 3000; // Sets port value to 'PORT" if it is avaialble otherwise defaults to 3000. The server then starts listening for incoming connections on that port.
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

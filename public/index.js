@@ -1,7 +1,7 @@
 "use strict";
 
 // import {io} from 'socket.io-client';
-const socket = io('http://localhost:3000'); //Initialize socket.io client
+const socket = io('http://localhost:3000'); //!Initialize socket.io client
 
 //!client side debug functions--------------------------
 
@@ -10,12 +10,17 @@ const socket = io('http://localhost:3000'); //Initialize socket.io client
         console.log(`Is room leader: ${isRoomLeader}`);
         console.log(`SocketID: ${socketID}`);
         console.log(`roomID: ${roomID}`);
+        console.log(`Current video ${localRoomObj.currentVideoLink? localRoomObj.currentVideoLink : "No Video Selected" }`);
+        console.log(`Current View state: ${currentAppState}`);
         
     }
 //!-----------------------------------------------------
 
 
-// Global variables
+//? Global variables (User side)
+
+let currentAppState = 'STATE_LOADING'; // Start with a loading state perhaps
+
 let username = "";
 let socketID = "";
 let isRoomLeader = false; 
@@ -23,7 +28,8 @@ let localRoomObj = ""; //room Obj containing inner users object, user count (int
 let usersObj = {}  
 let roomID;
 
-//------------YT API MUST BE IN GLOBAL SCOPE AS IS DONE HERE, NOT WITHIN `DOMContentLoaded`---------//
+
+//?------------YT API MUST BE IN GLOBAL SCOPE AS IS DONE HERE, NOT WITHIN `DOMContentLoaded`---------//
 // 1. Load the YouTube IFrame Player API code asynchronously
 let tag = document.createElement('script');
 tag.src = "https://www.youtube.com/iframe_api";
@@ -32,7 +38,6 @@ firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 console.log(`tag is: ${tag}`);
 
 let player;
-let videoNumber = 0; //counts how many videos have been played -- delete this later?
 
 // 2. This will call initializePlayer() when the iFrame is ready
 function onYouTubeIframeAPIReady() {
@@ -86,7 +91,7 @@ function onPlayerStateChange(event) {
     if (event.data === 1 && isRoomLeader) 
     {
         let currentTime = Math.floor(player.getCurrentTime());
-        socket.emit('set-videoTime', {currentTime, roomID});   //!seems to be causing issue?
+        socket.emit('set-videoTime', {currentTime, roomID});  
         socket.emit('play-video', {play_message:'Video played', roomID});
     }
     if (event.data === 2 && isRoomLeader)
@@ -115,288 +120,494 @@ function onPlayerError(event) {
     console.log('Error occurred:', event.data);
     window.alert('Error');
 }
-
-
+// ?End of YT api setup (global scope)
 //--------------------------------------------------------------------------------------------------------------------//
+
+
+
+//?--------------------------------------------------------------------------------------------------------------------//
 document.addEventListener('DOMContentLoaded', () => {
+    // initial call to set up UI
+    updateAppView(); // This will render the initial state (e.g., loading or username prompt)
     
-    const usernameForm = document.getElementById(`username-form`);
-    const usernameInput = document.getElementById(`username-input`);
-    const userList = document.getElementById('user-list');
 
-    const nonEmbedLinkRegex = /^(https?:\/\/)?(www\.)?youtube\.com\/watch\?v=([^&]+)/; //for yt video URLs that follow pattern: https://www.youtube.com/watch?v=ID or www.youtube.com/watch?v=ID  -- double check these comments
-    const embedLinkRegex = /^(https:\/\/)?(www\.)?youtube\.com\/embed\/.+$/;           //for yt video URLs that follow pattern: https://www.youtube.com/embed/ID
-    const wwwEmbedLinkRegex = /^www\.youtube\.com\/embed\/([^&]+)/;                    //for yt video URLs that follow pattern: www.youtube.com/embed/ID
+    //?State based rendering functions
+    //--------------------------------------------------------------------------------------------------------------------//
+
+    function updateAppView() {
+        const appContainer = document.getElementById('app-container');
+        if (!appContainer) {
+            console.error("App container not found!");
+            return;
+        }
+        // The state functions themselves will set appContainer.innerHTML
+
+        console.log("Updating app view to state:", currentAppState);
+
+        switch (currentAppState) {
+            case 'STATE_LOADING':
+                renderLoadingView();
+                break;
+            case 'STATE_SET_USERNAME':
+                renderSetUsernameView();
+                break;
+            case 'STATE_ROOM_SELECTION':
+                renderRoomSelectionView();
+                break;
+            case 'STATE_IN_ROOM':
+                renderInRoomView();
+                break;
+            default:
+                console.error('Unknown app state:', currentAppState);
+                appContainer.innerHTML = '<p style="color:red;">Error: Application in unknown state.</p>';
+        }
+    }
+
+    function renderLoadingView() {
+        const appContainer = document.getElementById('app-container');
+        appContainer.innerHTML = '<p style="color:white;">Loading...</p>';
+    }
+
+    function renderSetUsernameView() {
+        const appContainer = document.getElementById('app-container');
+        appContainer.innerHTML = `
+            <main class="center-col">
+                <p id="client-status-message" style="color:white"></p>
+                <form id="username-form">
+                    <input type="text" id="username-input" placeholder="Enter a username" autocomplete="on">
+                    <button type="submit">Set Username</button>
+                </form>
+            </main>
+        `;
+        document.getElementById('username-form').addEventListener('submit', handleUsernameSubmit);
+    }
+
+    function renderRoomSelectionView() {
+        const appContainer = document.getElementById('app-container');
+        appContainer.innerHTML = `
+            <main class="center-col">
+                <p style="color:white;">Welcome, ${username}!</p>
+                <p id="client-status-message" style="color:white;"></p>
+                <form id="roomCreate-form" style="margin-bottom: 10px;">
+                    <button type="submit">Create a Private Room</button>
+                </form>
+                <form id="roomJoin-form">
+                    <input type="text" id="roomJoin-input" placeholder="Enter Room ID to Join" autocomplete="off">
+                    <button type="submit">Join Room</button>
+                </form>
+            </main>
+        `;
+        document.getElementById('roomCreate-form').addEventListener('submit', handleCreateRoom);
+        document.getElementById('roomJoin-form').addEventListener('submit', handleJoinRoom);
+    }
+
+    function renderInRoomView() {
+        const appContainer = document.getElementById('app-container');
+        // Determine if video link input should be enabled
+        const videoLinkDisabled = !isRoomLeader ? 'disabled' : '';
+        const videoLinkPlaceholder = !isRoomLeader ? 'Only room leader can change video' : 'Enter YouTube Video URL';
+
+        appContainer.innerHTML = `
+            <div class="left-col">
+                <h3>Users in Room:</h3>
+                <div id="user-list" style="max-height: 300px; overflow-y: auto;">
+                    <!-- User list will be populated by renderUsersList -->
+                </div>
+
+                <p id="room-invite-link" style="visibility: visible"> RoomID: ${roomID} </p>
+            </div>
+
+            <main class="center-col">
+            
+                <form id="videolink-form">
+                    <input type="text" id="videolink-input" placeholder="${videoLinkPlaceholder}" autocomplete="off" ${videoLinkDisabled}>
+                    <button type="submit" id="submit-videolink" ${videoLinkDisabled}>Set Video</button>
+                </form>
+                <p id="client-status-message" style="color:white;"></p>
+                <div id="video-wrapper">
+                    <!-- Video iframe will be inserted here by setVideo() -->
+                    ${!localRoomObj || !localRoomObj.currentVideoLink ? '<div id="video-placeholder" style="width:640px; height:360px; background:#222; color:white; display:flex; align-items:center; justify-content:center; border: 1px solid #444;">No video loaded. Leader can set one.</div>' : ''}
+                </div>
+
+            </main>
+
+            <aside id="right-col">
+                <h3>Chat</h3>
+                <div id="message-container" style="height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 5px; margin-bottom: 10px;">
+                    <!-- Messages will appear here -->
+                </div>
+                <form id="send-container">
+                    <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+                    <button type="submit" id="send-button">Send</button>
+                </form>
+                <button id="leaveRoom-button" style="margin-top: 10px;">Leave Room</button>
+            </aside>
+        `;
+
+        // Attach event listeners for this view
+        document.getElementById('videolink-form').addEventListener('submit', handleVideoLinkSubmit);
+        document.getElementById('send-container').addEventListener('submit', handleSendMessage);
+        document.getElementById('leaveRoom-button').addEventListener('click', handleLeaveRoom);
+        document.getElementById('room-invite-link');
+
+        // Populate the dynamic parts
+        renderUsersList(); // Assumes usersObj is up to date
+
+        if (localRoomObj && localRoomObj.currentVideoLink) {
+            setVideo(localRoomObj.currentVideoLink); // This will create iframe and call initializePlayer
+        }
+        // Player state (seek, pause, etc.) will be handled by socket events or onPlayerReady
+    }
+    //? --- End of Application State Management & View Functions ---
+
+
     
-    // let messages = {}; //!to implement potentially, meant to enable the loading of prior chat when someone joins late 
-    const rightColumn = document.getElementById('right-col');
-    const messageContainer = document.getElementById('message-container');
-    const sendContainer = document.getElementById('send-container');
-    const messageInput = document.getElementById('message-input');
-
-    const roomCreateForm = document.getElementById('roomCreate-form');
-    const roomJoinForm = document.getElementById('roomJoin-form');
     
-    const clientStatusMessage = document.getElementById('client-status-message');
+    //?------------------ DOM Event Handler Functions --------------------------------------------------------------//
+    function handleUsernameSubmit(event) {
+        event.preventDefault();
+        const usernameInput = document.getElementById('username-input');
 
-    const leaveRoomButton = document.getElementById('leaveRoom-button');
+        if (usernameInput && usernameInput.value.trim()) 
+        {          
+            const proposedUsername = usernameInput.value.trim();
+            // Basic sanitization: allow letters, numbers, spaces, underscores, hyphens. Max length.
+            if (proposedUsername.length > 20 || !/^[a-zA-Z0-9_ -]+$/.test(proposedUsername)) {
+                alert("Username can only contain letters, numbers, spaces, underscores, hyphens and be max 20 chars.");
+                return;
+            }
+            username = proposedUsername;
+            socket.emit('new-user', username);
+            // Server will respond with 'username-set', which triggers state change
+        }
+        else 
+        {
+            alert("Username cannot be empty!");
+        }
 
-    let videoLink = "";
-    const videoWrapper = document.getElementById('video-wrapper');
-    const videoLinkForm = document.getElementById('videolink-form');
-    const videoLinkInput = document.getElementById('videolink-input');  
-    const submitVideoLinkButton = document.getElementById('submit-videolink');
+    };
+
+
+    function handleCreateRoom(event) {
+        event.preventDefault();
+
+        const statusMsg = document.getElementById('client-status-message');
+        if (statusMsg) statusMsg.innerText = "Creating room...";
+        socket.emit('create-room', { username, socketID });
+    }
+
+
+    function handleJoinRoom(event) {
+        event.preventDefault();
+        const roomJoinInput = document.getElementById('roomJoin-input');
+        const statusMsg = document.getElementById('client-status-message');
+
+        if (roomJoinInput && roomJoinInput.value.trim()) {
+            if (statusMsg) statusMsg.innerText = "Joining room...";
+            const req_roomID = roomJoinInput.value.trim();
+            socket.emit('join-room', { req_username: username, req_socketID: socketID, req_roomID });
+        } else {
+            alert("Room ID cannot be empty!");
+        }
+    }
     
-    function renderUsersList() {
+
+    function handleVideoLinkSubmit(event) 
+    {
+        event.preventDefault();
+        const videoLinkInput = document.getElementById('videolink-input');
+        if (videoLinkInput && videoLinkInput.value.trim() && isRoomLeader) 
+        {
+            const rawLink = videoLinkInput.value.trim();
+            const verifiedLink = verifyLink(rawLink); // verifyLink is your existing function
+            if (verifiedLink) 
+            {
+                setVideo(verifiedLink); // Client sets its own video immediately
+                socket.emit('videoLink-set', { roomID, verifiedLink });
+                videoLinkInput.value = ''; // Clear input after successful submission
+            } 
+            else 
+            {
+                alert("Invalid YouTube link format!");
+            }
+        } 
+        else if (!isRoomLeader) 
+        {
+            alert("Only the room leader can set the video.");
+        }
+    }
+
+    //Sending messages to everyone else in a room, if connected to one 
+    function handleSendMessage(event) 
+    {
+        event.preventDefault();
+        const messageInput = document.getElementById('message-input');
+
+        //("if connected" condition enforced by local verification paired with backup server verification)
+        if (messageInput && messageInput.value.trim() && roomID && localRoomObj) 
+        {
+            const message = messageInput.value.trim();
+            socket.emit('sendMessage', { message, username, roomID }); // Send an obj containing the message, and roomID to the server
+            messageInput.value = '';
+        }
+    }
+
+
+    function handleLeaveRoom() 
+    {
+        if (localRoomObj && roomID) 
+        {
+            console.log(`Leaving room: ${roomID}`);
+            socket.emit('user-leaves-room', { roomID }); // Server knows socket.id
+
+            if (player && typeof player.destroy === 'function') {
+                player.destroy();
+                player = null;
+                console.log("Player destroyed on leaving room.");
+            }
+
+            // Reset local state
+            localRoomObj = null;
+            roomID = null;
+            isRoomLeader = false;
+            usersObj = {};
+
+            currentAppState = 'STATE_ROOM_SELECTION';
+            updateAppView();
+        } 
+        else 
+        {
+            console.log("Not in a room, cannot leave.");
+        }
+    }
+    
+
+    //? ------ Utility Functions (renderUsersList, setVideo, verifyLink) ----------------------------------------//
+    function renderUsersList() 
+    {
+        const userListDiv = document.getElementById('user-list');
+        if (!userListDiv)
+        {
+            console.warn("User list container not found in current view.");
+            return;
+        }
+        
         // Ensure users is a valid object
         if (!usersObj || typeof usersObj !== "object") 
         {
             console.log("Users list is not available or invalid.");
+            userListDiv.innerHTML = '<li>No user data.</li>';
             return;
         }
-        
-        //Removes the hidden attribute for the users list element in index.html by clearing the styles applied
-        userList.style = '';
-        
-        //clears the current list
-        userList.innerHTML = '';
 
         //renders the new list of users
+        userListDiv.innerHTML = ''; // Clear current list
         const socketIDs = Object.keys(usersObj);
-        for (const socketID of socketIDs) {
-            if (usersObj[socketID])
+        if (socketIDs.length === 0) 
+        {
+            userListDiv.innerHTML = '<li>No users in room.</li>';
+            return;
+        }
+        for (const id of socketIDs) 
+        {
+            if (usersObj[id]) 
             {
                 const userElement = document.createElement('div');
-                userElement.innerText = usersObj[socketID]; // Display username
-                userElement.id = socketID; // Set the element's ID to the users socket ID
-                userList.appendChild(userElement);
+                userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeaders && localRoomObj.roomLeaders[id] ? ' (Leader)' : '');
+                userElement.id = `user-${id}`; // Ensure unique ID for potential styling/manipulation
+                userListDiv.appendChild(userElement);
             }
         }
         
     }
 
-    //On connection
+
+    function verifyLink(link) {
+        let videoId = null;
+
+        // Regex to capture video ID from various YouTube URL formats
+        const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        // Explanation:
+        // (?:https?:\/\/)? : Optional http or https, (?:www\.)? : Optional www., youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/) : Matches youtube.com followed by common paths, |youtu\.be\/ : OR matches youtu.be/, ([a-zA-Z0-9_-]{11}) : Captures the 11-character video ID
+
+        const match = link.match(youtubeRegex);
+
+        if (match && match[1]) {
+            videoId = match[1];
+        } 
+        else {
+            console.log('Link did not match any known YouTube regex or no video ID found');
+            return false;
+        }
+
+        // Base embed URL
+        const baseEmbedUrl = `https://www.youtube.com/embed/${videoId}`;
+
+        try {
+            // Create a URL object. If the link doesn't have a protocol, prepend https.
+            // This is a bit simplified; a full URL parser might be needed for edge cases of partial URLs.
+            const fullLinkForParsing = (link.startsWith('http://') || link.startsWith('https://')) ? link : `https://${link}`;
+            const url = new URL(fullLinkForParsing); // Use the original link to preserve existing params
+            const params = new URLSearchParams(url.search);
+
+            // Set desired parameters (will overwrite if they exist, or add if they don't)
+            params.set('autoplay', '1');
+            params.set('enablejsapi', '1');
+
+            return `${baseEmbedUrl}?${params.toString()}`;
+
+        } catch (e) {
+            // Fallback if the original link was too malformed for the URL constructor,
+            // but we have the videoId.
+            console.warn('Original link was not a valid URL for param parsing, constructing fresh embed URL:', e.message);
+            return `${baseEmbedUrl}?autoplay=1&enablejsapi=1`;
+        }
+    }   
+
+
+    function setVideo(link) //verifyLink should run before this happens
+    { 
+        const videoWrapper = document.getElementById('video-wrapper');
+        if (!videoWrapper) {
+            console.error("Video wrapper not found");
+            return;
+        }
+        if (username && roomID) // Checks if user is in a room context
+        {
+            console.log(`The link was set to: ${link}`)
+            videoWrapper.innerHTML = `<iframe id="yt-iframe" width="640" height="360" src="${link}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
+            
+            if (player && typeof player.destroy === 'function') 
+            {
+                player.destroy();
+                player = null; // Important to nullify
+                console.log("Existing player destroyed before setting new video.");
+            }
+            // YT API might need a moment for the new iframe to be fully in DOM
+            setTimeout(initializePlayer, 300); // initializePlayer will create new YT.Player
+        } 
+        else 
+        {
+            console.warn("Cannot set video: user not in a room or username not set.");
+        }    
+    
+    }
+
+
+    //? Socket Event Functions
     //--------------------------------------------------------------------------------------
     socket.on('on-connection', (socketID_fromServer) => { 
         console.log(`You have ID: ${socketID_fromServer} and have succesfully connected! Your username is not set yet`);
         socketID = socketID_fromServer; // Update the local socketID variable 
         
-    });
-
-
-    //Setting username
-    //--------------------------------------------------------------------------------------
-    usernameForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (usernameInput.value) //!improve imput sanitization, don't allow code, spaces, or weird characters, max characters 20-25
-        {          
-    
-            username = usernameInput.value.trim();
-            
-            socket.emit('new-user', username);
-
-            console.log(`User name submitted is: ${username}`);
-            usernameInput.value = "";
-            messageInput.removeAttribute('disabled');
-            messageInput.removeAttribute('placeholder');
-            usernameForm.style.display = 'none'; // Hides the username form after submission //!maybe change this so that it fully removes the element?
-
-            videoLinkInput.removeAttribute('disabled');
-            videoLinkInput.removeAttribute('placeholder');
-
-            roomCreateForm.innerHTML = ` 
-            <button type = "submit" id="submit-roomCreate" style="display: block; margin-bottom: 10%">Create a private room</button>
-            `
-
-            roomJoinForm.innerHTML = `
-            <input type="text" id="roomJoin-input" placeholder="Join an existing room" >
-            <button type="submit" id="joinRoom-button">Join</button>
-            `
-        }
-        else 
-        {
-            window.alert("Username cannot be empty!");
-        }
-
-    })
-    
-    socket.on('username-set', (usersObjFromServer) => {
-        console.log(`Users list is: ${JSON.stringify(usersObjFromServer)}`);
-        renderUsersList();
+        currentAppState = 'STATE_SET_USERNAME';
+        updateAppView(); 
     });
 
     
-    
-    //Creating a room
-    //--------------------------------------------------------------------------------------
-    roomCreateForm.addEventListener('submit', (e) => {
-        e.preventDefault();      
-        
-        console.log(`Creating Room...`);
-        clientStatusMessage.innerText = "Trying to create a room..."
-        socket.emit('create-room', {username, socketID});
-        
-    })
+    socket.on('username-set', (username) => {
+        console.log(`Server confirmation: Username succesfully set as ${username}`);
+        currentAppState = 'STATE_ROOM_SELECTION';
+        updateAppView();
+    });
+
 
     socket.on('created-room', ({roomID_fromServer, roomObj_fromServer}) => {
         localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
         isRoomLeader = true; //sets boolean to true as the creator of the room
+        usersObj = localRoomObj.joined_users //initialize usersObj, mirrors the object contained within roomObJ_fromServer
+    
         
         console.log (`From Server: Room created with ID of ${roomID_fromServer}`);
         console.log(`local roomID variable set as ${roomID} as a result of creating room`);
         console.log(roomObj_fromServer);
 
-        clientStatusMessage.remove();
-        videoLinkForm.style="display: inline;"
-        roomCreateForm.innerHTML = "";
-        roomJoinForm.innerHTML = "";
-
-        submitVideoLinkButton.removeAttribute('disabled')
-
-        rightColumn.style = "visibility: visible;"; //reveals the elements in the right column (chat)
-        renderUsersList();
-
+        currentAppState = 'STATE_IN_ROOM';
+        updateAppView();
+        // Video and player state will be handled by renderInRoomView and subsequent events
 
     })
     
     socket.on('room-create-fail', () => {
-        console.log (`The room attempted to be made by: ${username} could not be created, please try again, or try again later. If the issue persists, contact support.`);
-    })
-
-
-
-    //Joining a room 
-    //--------------------------------------------------------------------------------------
-    roomJoinForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            let roomJoinInput = document.getElementById('roomJoin-input');
-            
-            if (roomJoinInput.value)
-            {
-                let joinRequestObj = {
-                    "req_username": username,
-                    "req_socketID": socketID,
-                    "req_roomID": roomJoinInput.value
-                }
-                console.log(`Sending join request obj to server with roomID set as: ${roomJoinInput.value}`);
-                socket.emit('join-room', joinRequestObj);     
-
-            }
-            else 
-            {
-                window.alert("You cannot submit an empty form");
-            }
-        
+        console.log (`The room attempted to be made by: ${username} could not be created, please try again, or try again later.`);
+        const statusMsg = document.getElementById('client-status-message');
+        if (statusMsg) statusMsg.innerText = "Failed to join room. Room ID might be invalid or room is full.";
+        // No state change
     })
 
     socket.on('joined-room', ({roomID_fromServer, roomObj_fromServer}) => {
-        console.log(`Joined room with ID ${roomID_fromServer}`)
         localRoomObj = roomObj_fromServer;
         roomID = roomID_fromServer;
+        usersObj = localRoomObj.joined_users;
+
+        console.log(`Joined room with ID ${roomID_fromServer}`)
         console.log(`local roomID variable set as ${roomID} as a result of joining room`);
 
-        clientStatusMessage.remove();
-        videoLinkForm.style="display: inline;"
-        roomCreateForm.innerHTML = "";
-        roomJoinForm.innerHTML = "";
+        currentAppState = 'STATE_IN_ROOM';
+        updateAppView();
 
-        submitVideoLinkButton.removeAttribute('disabled')
-
-        rightColumn.style = "visibility: visible;"; //reveals the elements in the right column (chat)
-        renderUsersList();
-        
-        setVideo(localRoomObj.currentVideoLink);
-        player.seekTo(time_fromServer);
-        if (localRoomObj.videoPaused === true)
-        {
-            player.pauseVideo;
+        // After view is rendered, apply video state if player is ready
+        // Should be robust, player might not be ready immediately
+        function applyInitialPlayerState() {
+            if (player && typeof player.seekTo === 'function' && localRoomObj.currentVideoLink) {
+                player.setPlaybackRate(localRoomObj.currentPlaybackRate);
+                player.seekTo(localRoomObj.currentTime, true);
+                if (localRoomObj.videoPaused && player.getPlayerState() !== YT.PlayerState.PAUSED) {
+                    player.pauseVideo();
+                } else if (!localRoomObj.videoPaused && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                    player.playVideo();
+                }
+            } else if (localRoomObj.currentVideoLink) { // If video link exists but player not ready, retry
+                setTimeout(applyInitialPlayerState, 500);
+            }
         }
-
+        if (localRoomObj.currentVideoLink) {
+             setTimeout(applyInitialPlayerState, 750); // Initial delay for player API
+        }
     });
 
     socket.on('room-join-fail', () => {
-        console.log(`User has tried to join a room with an invalid room ID`);
-        clientStatusMessage.innerText = "A room with this ID does not exist"
-    })
+        console.log(`Room join failed.`);
+        const statusMsg = document.getElementById('client-status-message');
+        if (statusMsg) statusMsg.innerText = "Failed to join room. Room ID might be invalid or room is full.";
+        // No state change
+    });
 
-    //Client leaves the room but stays connected to the general server/site
-    //--------------------------------------------------------------------------------------
-    leaveRoomButton.addEventListener('click', (e) => {
-        e.preventDefault();
-        leaveRoom();
-    })
-    
-    function leaveRoom() {
-        if (localRoomObj && roomID) 
-        {
-            console.log(`Leaving room: ${localRoomObj}`);
-            socket.emit('user-leaves-room', {roomID} );
-            localRoomObj = null; // Clears the local room variable by setting to null
-            roomID = null; //Clears the local roomID 
-            renderUsersList(); // Clear the user list on the client side //!might be wrong? or remove when changing html design
-
-        } 
-        else 
-        {
-            console.log("You are not in a room.");
-        }
-    }
-
-
-    
-    //Listen for when someone else joins current room
-    //--------------------------------------------------------------------------------------
     socket.on('update-users-list', ({usersInRoom_fromServer}) => {
         console.log('Received update-users-list event:', usersInRoom_fromServer);
-        
-        // Ensure the data is valid before updating the local `users` object to match server data
-        if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") 
+        if (currentAppState === 'STATE_IN_ROOM') 
         {
-            usersObj = usersInRoom_fromServer;
-            console.log(`new users list is: ${JSON.stringify(usersObj)}`);
-            renderUsersList();
+            // Ensure the data is valid before updating the local `users` object to match server data
+            if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") 
+            {
+                usersObj = usersInRoom_fromServer;
+                console.log(`new users list is: ${JSON.stringify(usersObj)}`);
+                renderUsersList();
+            }
+            else 
+            {
+                console.log("Users list is not available or invalid");
+            }
+
         }
-        else 
-        {
-            console.log("Users list is not available or invalid");
-        }
-        
     
     });
 
-    //Sending messages to everyone else in a room, if connected to one 
-    //("if connected" condition enforced by local verification paired with backup server verification)
-    //--------------------------------------------------------------------------------------
-    sendContainer.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (messageInput.value.trim() && roomID && localRoomObj)
-        {
-            const message = `${messageInput.value.trim()}`;
-            socket.emit('sendMessage', {message, username, roomID} ); // Send an obj containing the message, and roomID to the server
-            messageInput.value = '';
-        }
-    });
-    
     //Listens for when a message is received, if connected to the/any room
-    //("if connected" condition also enforced locally and server side)
+    //("if connected" condition enforced locally and server side)
     //--------------------------------------------------------------------------------------
     socket.on('message', (message) => {
-        if (roomID && localRoomObj) 
-        {
-            const messageElement = document.createElement('div');
-            messageElement.innerText = message;
-            messageContainer.appendChild(messageElement); // Display the received message on the page by appending it within 'messageContainer'
+        if (currentAppState === 'STATE_IN_ROOM') {
+            const messageContainer = document.getElementById('message-container');
+            if (messageContainer) {
+                const messageElement = document.createElement('div');
+                messageElement.innerText = message;
+                messageContainer.appendChild(messageElement); // Display the received message on the page by appending it within 'messageContainer'
+                messageContainer.scrollTop = messageContainer.scrollHeight; // Scroll to bottom
+            }
         }
     });
-
-    //Listens for 'error' events containing messages are emitted from the server
-    //--------------------------------------------------------------------------------------
-    socket.on('error', (errorMessage) => {
-        console.log(`Error from server: ${errorMessage}`);
-        alert(errorMessage); // Optionally show an alert to the user
-    });
-
 
     //Listen for when someone else leaves the room
     //--------------------------------------------------------------------------------------
@@ -405,134 +616,65 @@ document.addEventListener('DOMContentLoaded', () => {
         renderUsersList();
     });
 
-
-    // Client user fully disconnects (closes the tab or loses connection)
-    //-----------------------------------------------------------------------------------------------
-    window.addEventListener('beforeunload', () => {
-        socket.emit('user-disconnect', username);
-    });
-
-    socket.on('user-disconnected', ({username, socketID}) => {
-        const disconnectedUser = document.getElementById(socketID); 
-        disconnectedUser.remove(); // removes element from left side user list
-
+    //Listens for 'error' events containing messages are emitted from the server
+    //--------------------------------------------------------------------------------------
+    socket.on('error', (errorMessage) => {
+        console.log(`Error from server: ${errorMessage}`);
+        alert(errorMessage); // Optionally show an alert to the user
+        // might do a more graceful error display than alert()
+        // Potentially a STATE_ERROR and renderErrorView()
     });
 
 
-
-    //?----------------Video/Youtube Section-------------------------------------------------------------------
-
-
-    function convertToEmbedUrl(url) {
-        const convertedUrl = url.replace(nonEmbedLinkRegex, 'https://www.youtube.com/embed/$3');
-        console.log(`Converted URL: ${convertedUrl}`);
-        return convertedUrl;
-    }
-
-    function verifyLink(link) {
-        if (wwwEmbedLinkRegex.test(link)) {
-            console.log('Link matches wwwEmbedLinkRegex');
-            return `https://${link}?autoplay=1&enablejsapi=1`;
-        } else if (embedLinkRegex.test(link)) {
-            console.log('Link matches embedLinkRegex');
-            return (link + '?autoplay=1&enablejsapi=1');
-        } else if (nonEmbedLinkRegex.test(link)) {
-            console.log('Link matches nonEmbedLinkRegex');
-            return (convertToEmbedUrl(link) + '?autoplay=1&enablejsapi=1');
-        } else {
-            console.log('Link did not match any regex');
-            return false; //In the case that the input given does not match any valid youtube video URL
-        }
-    }
-
-    function setVideo(link) {
-        if (username && roomID)
-        {
-            console.log(`The link was set to: ${link}`)
-            videoWrapper.innerHTML = '';
-            ++videoNumber;
-            videoWrapper.innerHTML = `<iframe id="yt-iframe" width="640" height="360" src="${link}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
-            videoLinkInput.value = '';
-            // initializePlayer(); //Reinitialize the player with the new video without small delay - keep commented or delete later
-            setTimeout(initializePlayer, 500); // Re-initialize the player with the newly set video, but with a delay to ensure the iframe is fully loaded
-        }    
-    
-    }
-
-
-    // Handles client setting the video from their side
-    videoLinkForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        videoLink = videoLinkInput.value; 
-        let verifiedLink = verifyLink(videoLink)
-        
-        if (verifiedLink) 
-        {
-            if (isRoomLeader)
-            {
-                console.log(`verifiedLink is: ${verifiedLink}`);
-                setVideo(verifiedLink);
-                socket.emit('videoLink-set', {roomID, verifiedLink});
-            }
-            else 
-            {
-                window.alert("Only room leaders can set or control the video player!");
-            }
-            
-        }
-        else 
-        {
-            window.alert("Invalid link! Are you sure you entered a YouTube link?");
-            console.warning("Setting video failed, link not good");
-        }
-        
-    });
-
+    //? Video Socket Functions
 
     // Receiving and handling video player updates from room leaders 
-    // Interactions are done through Youtube API once a valid link is loaded
+    // Interactions are to be done through Youtube API, once a valid youtube video link is loaded
     //--------------------------------------------------------------------------------------
     socket.on('set-videoLink', (videoLink_fromServer) => {
-        videoLink = videoLink_fromServer;
-        setVideo(videoLink);
+        if (currentAppState === 'STATE_IN_ROOM' && typeof videoLink_fromServer === 'string' ) {
+            // videoLink = videoLink_fromServer; // Global videoLink might be redundant if localRoomObj has it
+            if (localRoomObj) localRoomObj.currentVideoLink = videoLink_fromServer;
+            setVideo(videoLink_fromServer);
+            console.log (`From server: Video link set to ${videoLink_fromServer}`)
+        }
     });
 
     socket.on('videoTime-set', (time_fromServer) => {
-        if (player && player.seekTo && roomID)
-        {
-            player.seekTo(time_fromServer);
-            console.log(`Playback time has been updated to: ${time_fromServer} seconds`);
+        if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) {
+            if (Math.abs(player.getCurrentTime() - time_fromServer) > 2) { // Only seek if significant diff
+                player.seekTo(time_fromServer, true); // true for allowSeekAhead
+                console.log(`Playback time updated to: ${time_fromServer} seconds by server.`);
+            }
         }
-        else 
         {
-            console.log("Player is not ready to seek");
+            console.warn("Issue when receiving/setting videoTime-set req from server");
         }
     });
 
     socket.on('video-paused', (pause_message) => {
-        console.log(pause_message + ' by another user');
         
         //checks if the player and the videoPaused api/function are ready and available
-        if (player && player.pauseVideo && roomID)
-        {
+        if (currentAppState === 'STATE_IN_ROOM' && player && player.pauseVideo && player.getPlayerState() !== YT.PlayerState.PAUSED) {
             player.pauseVideo();
-            localRoomObj.videoPaused = true;
+            if(localRoomObj) localRoomObj.videoPaused = true;
+            console.log(pause_message);
         }
-        else console.log('request from server to pause recieved but could not pause for some reason');
+        else console.warn('request from server to pause recieved but could not pause for some reason');
     });
 
     socket.on('video-played', (play_message) => {
-        if (player && player.playVideo() && roomID)
-        {
+       if (currentAppState === 'STATE_IN_ROOM' && player && player.playVideo && player.getPlayerState() !== YT.PlayerState.PLAYING) {
             player.playVideo();
+            if(localRoomObj) localRoomObj.videoPaused = false;
+            console.log(play_message);
         }
-        else console.log('request from server to play recieved but could not play for some reason');
+        else console.warn('request from server to play recieved but could not play for some reason');
     });
 
     socket.on('playbackRate-set', (rate_fromServer) => {
         console.log('playback rate set by another user');
-        if (player && player.setPlaybackRate && roomID)
-        {
+        if (currentAppState === 'STATE_IN_ROOM' && player && player.setPlaybackRate) {
             player.setPlaybackRate(rate_fromServer);
         }
     });

@@ -15,65 +15,11 @@
     
 <body>
     
-    <div class="left-col" style="">
-        Users
-        <div id="user-list" style="visibility: hidden">
-            
-                
-        </div>
+    <div id="app-container">
+
+     <!-- SPA goes in here (index.js state render functions) -->
+
     </div>
-
-
-    <main class="center-col">
-        
-        <form id="videolink-form" style="display: inline; display: none" >
-            <label for="videolink-input" style="display:block;">Enter a youtube URL:</label>
-            <input type="text" id="videolink-input" placeholder="Choose a username first" disabled>
-            <button type="submit" id="submit-videolink" disabled>Submit</button>
-        </form>
-
-        <p id="client-status-message" style="color:white">
-
-        </p>
-        
-        <form id="username-form">
-            <!-- <label for="username-input" style="display:block;">Enter a username:</label> -->
-            <input type="text" id="username-input" placeholder="Enter a username">
-            <button type="submit" id="submit-username">Submit</button>
-        </form>
-
-        <form id="roomCreate-form" style="display: inline;">
-
-        </form>
-
-        <form id="roomJoin-form" style="display: inline;">
-
-        </form>
-
-        <div id="video-wrapper" style="visibility: visible">
-            <!-- Default video  -->
-            <!-- <iframe id="yt-iframe" width="640" height="360" src="https://www.youtube.com/embed/CjpEZ2LAazM?autoplay=1&enablejsapi=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe> -->
-           
-        </div>
-
-    </main>
-
-
-    <aside id="right-col" style="visibility: hidden">
-        
-        
-        <div id="message-container">
-            
-        </div>
-    
-        <form id="send-container">
-            <input type="text" id="message-input" placeholder="Choose a username first" disabled>
-            <button type="submit" id="send-button">Send</button>
-        </form>
-
-        <button id="leaveRoom-button">Leave Room</button>
-
-    </aside>
 
 </body>
 
