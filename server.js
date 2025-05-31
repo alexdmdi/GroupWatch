@@ -229,22 +229,24 @@ io.on('connection', (socket) => {
     });
 
 
-    // Handles when user sets the current video playing
+    // Handles when user sets the current video playing with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('videoLink-set', ({roomID : roomID_fromClient, verifiedLink: videoLink_fromClient}) => {
-      if (rooms[roomID_fromClient])
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id])
       {
         rooms[roomID_fromClient].currentVideoLink = videoLink_fromClient;
         socket.broadcast.to(roomID_fromClient).emit('set-videoLink', rooms[roomID_fromClient].currentVideoLink); //emit video link to all clients except the one who set the link
         console.log(`Current video for room ${roomID_fromClient} set to: ${rooms[roomID_fromClient].currentVideoLink}`);
       }
       else {
-        socket.emit('error', `You tried to set the link to ${videoLink_fromClient} with invalid room ID of ${roomID_fromClient}`)
+        // User is NOT a leader, or room doesn't exist, or roomLeaders object is missing
+        socket.emit('error', `Issue: You tried to set the link to ${videoLink_fromClient} but either you are not a room leader or there is an issue with the server data`)
+        console.log(`Unauthorized videoLink-set attempt by ${users[socket.id] || socket.id} for room ${roomID_fromClient}`);
       }
 
     });
 
 
-    // Handles when user changes video time. Implements rate limiting involving the global 'videoTimeUpdateRateLimit' object
+    // Handles when user changes video time. Implements rate limiting involving the global 'videoTimeUpdateRateLimit' object, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('set-videoTime', ({currentTime: time_fromClient, roomID: roomID_fromClient}) => {
       if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders[socket.id]){
         const now = Date.now();
@@ -264,28 +266,52 @@ io.on('connection', (socket) => {
       }
       else {
         socket.emit('error', 'You are not a leader or the room is invalid. Cannot set video time.');
-        console.log(`Failed set-videoTime attempt by ${socket.id} for room ${roomID_fromClient}. Leader: ${!!(rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders[socket.id])}`);
+        console.log(`Failed set-videoTime attempt by ${socket.id} for room ${roomID_fromClient}.`);
       }
     });
     
 
-    // Handles when user plays the current video playing
+    // Handles when user plays the current video playing, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('play-video', ({play_message : play_message, roomID : roomID_fromClient}) => {
-      console.log(play_message);
-      socket.to(roomID_fromClient).emit('video-played', 'Video played by room leader');
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+        socket.to(roomID_fromClient).emit('video-played', 'Video played by room leader');
+        console.log(play_message);
+
+      }
+      else {
+        socket.emit('error', 'You are not a leader or the room is invalid. Cannot set play-video command for the room.');
+        console.log(`Failed play-video attempt by ${socket.id} for room ${roomID_fromClient}.`);
+      }
+
     });
 
-    // Handles when user pauses the current video playing
+    // Handles when user pauses the current video playing, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => {
-      console.log(pause_message);
-      socket.to(roomID_fromClient).emit('video-paused', 'Video paused by a room leader');
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+        socket.to(roomID_fromClient).emit('video-paused', 'Video paused by a room leader');
+        console.log(pause_message);
+        
+      }
+      else {
+        socket.emit('error', 'You are not a leader or the room is invalid. Cannot pause video for the room.');
+        console.log(`Failed pause-video attempt by ${socket.id} for room ${roomID_fromClient}.`);
+      }
+      
     });
 
-    // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
+    // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('set-playbackRate', ({playbackRate_eventData: playbackRate_fromClient, roomID : roomID_fromClient}) => {
-      console.log(`player playback rate set to: ${playbackRate_fromClient}`);
-      rooms[roomID_fromClient].currentPlaybackRate = playbackRate_fromClient;
-      socket.to(roomID_fromClient).emit('playbackRate-set', rooms[roomID_fromClient].currentPlaybackRate);
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+        rooms[roomID_fromClient].currentPlaybackRate = playbackRate_fromClient;
+        socket.to(roomID_fromClient).emit('playbackRate-set', rooms[roomID_fromClient].currentPlaybackRate);
+        console.log(`player playback rate set to: ${playbackRate_fromClient}`);
+
+      }
+      else {
+        socket.emit('error', 'You are not a leader or the room is invalid. Cannot set playback rate for the room.');
+        console.log(`Failed set-playbackRate attempt by ${socket.id} for room ${roomID_fromClient}.`);
+      }
+      
     });
 
 
