@@ -231,7 +231,7 @@ io.on('connection', (socket) => {
 
     // Handles when user sets the current video playing with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('videoLink-set', ({roomID : roomID_fromClient, verifiedLink: videoLink_fromClient}) => {
-      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id])
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders && rooms[roomID_fromClient].roomLeaders[socket.id])
       {
         rooms[roomID_fromClient].currentVideoLink = videoLink_fromClient;
         socket.broadcast.to(roomID_fromClient).emit('set-videoLink', rooms[roomID_fromClient].currentVideoLink); //emit video link to all clients except the one who set the link
@@ -273,7 +273,7 @@ io.on('connection', (socket) => {
 
     // Handles when user plays the current video playing, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('play-video', ({play_message : play_message, roomID : roomID_fromClient}) => {
-      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders && rooms[roomID_fromClient].roomLeaders[socket.id]){
         socket.to(roomID_fromClient).emit('video-played', 'Video played by room leader');
         console.log(play_message);
 
@@ -287,7 +287,7 @@ io.on('connection', (socket) => {
 
     // Handles when user pauses the current video playing, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => {
-      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders && rooms[roomID_fromClient].roomLeaders[socket.id]){
         socket.to(roomID_fromClient).emit('video-paused', 'Video paused by a room leader');
         console.log(pause_message);
         
@@ -301,7 +301,7 @@ io.on('connection', (socket) => {
 
     // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('set-playbackRate', ({playbackRate_eventData: playbackRate_fromClient, roomID : roomID_fromClient}) => {
-      if (rooms[roomID_fromClient] && rooms[roomID_fromClient.roomLeaders] && rooms[roomID_fromClient].roomLeaders[socket.id]){
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeaders && rooms[roomID_fromClient].roomLeaders[socket.id]){
         rooms[roomID_fromClient].currentPlaybackRate = playbackRate_fromClient;
         socket.to(roomID_fromClient).emit('playbackRate-set', rooms[roomID_fromClient].currentPlaybackRate);
         console.log(`player playback rate set to: ${playbackRate_fromClient}`);
