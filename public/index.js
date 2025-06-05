@@ -24,7 +24,7 @@ let currentAppState = 'STATE_LOADING'; // Start with a loading state perhaps
 let username = "";
 let socketID = "";
 let isRoomLeader = false; 
-let localRoomObj = ""; //room Obj containing inner users object, user count (int), roomLeaders object, messages object, current video link, currentTime, currentPlaybackRate
+let localRoomObj = ""; //room Obj containing inner users object, user count (int), current roomLeader object, messages object, current video link, currentTime, currentPlaybackRate
 let usersObj = {}  
 let roomID;
 
@@ -75,12 +75,52 @@ function initializePlayer() {
 
 function onPlayerReady(event) {
     console.log('onPlayerReady called');
-    
+    const playerInstance = event.target // More descriptive name for the player
+
     const iframe = document.getElementById('yt-iframe');
-    iframe.style.borderColor = '#FF6D00';
-    iframe.style.borderWidth = '2px';
-    event.target.playVideo();
-    console.log('Player is ready'); // Can now use player.seekTo() and other methods
+    if (iframe) // Double check if the iframe exists
+    {
+        iframe.style.borderColor = '#FF6D00';
+        iframe.style.borderWidth = '2px';
+    }
+
+    // Check if the user is in a room and has the room's state
+    if (currentAppState === 'STATE_IN_ROOM' && localRoomObj && typeof localRoomObj.currentTime !== 'undefined')
+    {
+        console.log(`Player ready in room. Syncing to room state: Time=${localRoomObj.currentTime}, Paused=${localRoomObj.videoPaused}, Rate=${localRoomObj.currentPlaybackRate}`);
+
+        playerInstance.setPlaybackRate(localRoomObj.currentPlaybackRate);
+
+        // Important: Seek to the correct time *before* play/pause state is synced
+        playerInstance.seekTo(localRoomObj.currentTime, true) // true allows seeking ahead
+
+        // After seeking, set play/pause state. If not using enough settTmeout() delays or in the right place, then one step may interefere with the other
+        if (localRoomObj.videoPaused === true) {
+            setTimeout(() => { // Adding a small delay to ensure seekTo has initiated
+                if (playerInstance.getPlayerState() !== YT.PlayerState.PAUSED) {
+                    playerInstance.pauseVideo();
+                    console.log("Player explicitly paused based on room state after seek.");
+                }
+            }, 100); // Adjust delay if needed, or try without if pauseVideo() works immediately after seekTo
+        } 
+        else {
+            // If it's supposed to be playing
+            if (playerInstance.getPlayerState() !== YT.PlayerState.PLAYING) {
+                playerInstance.playVideo();
+                console.log("Player explicitly played based on room state after seek.");
+            }
+        }
+    } 
+    else 
+    {
+        // Fallback: If not in a room state or localRoomObj isn't ready (shouldn't happen if flow is correct),
+        // or if this is the very first video load before joining any room (not your current app flow).
+        console.log('Player ready, but not in a synced room state or localRoomObj not ready. Defaulting to playVideo.');
+        playerInstance.playVideo();
+    }
+
+    console.log('Player is ready and initial state (should be) synced.');
+    
 }
 
  //-1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 4: video cued
@@ -136,7 +176,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateAppView() {
         const appContainer = document.getElementById('app-container');
-        if (!appContainer) {
+        if (!appContainer) 
+        {
             console.error("App container not found!");
             return;
         }
@@ -221,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
                 <form id="videolink-form">
                     <input type="text" id="videolink-input" placeholder="${videoLinkPlaceholder}" autocomplete="off" ${videoLinkDisabled}>
-                    <button type="submit" id="submit-videolink" ${videoLinkDisabled}>Set Video</button>
+                    <button type="submit" id="submit-videolink-button" ${videoLinkDisabled}>Set Video</button>
                 </form>
                 <p id="client-status-message" style="color:white;"></p>
                 <div id="video-wrapper">
@@ -264,7 +305,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     
     //?------------------ DOM Event Handler Functions --------------------------------------------------------------//
-    function handleUsernameSubmit(event) {
+    function handleUsernameSubmit(event) 
+    {
         event.preventDefault();
         const usernameInput = document.getElementById('username-input');
 
@@ -288,7 +330,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
 
-    function handleCreateRoom(event) {
+    function handleCreateRoom(event) 
+    {
         event.preventDefault();
 
         const statusMsg = document.getElementById('client-status-message');
@@ -297,7 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    function handleJoinRoom(event) {
+    function handleJoinRoom(event) 
+    {
         event.preventDefault();
         const roomJoinInput = document.getElementById('roomJoin-input');
         const statusMsg = document.getElementById('client-status-message');
@@ -306,7 +350,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (statusMsg) statusMsg.innerText = "Joining room...";
             const req_roomID = roomJoinInput.value.trim();
             socket.emit('join-room', { req_username: username, req_socketID: socketID, req_roomID });
-        } else {
+        } 
+        else 
+        {
             alert("Room ID cannot be empty!");
         }
     }
@@ -400,7 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        //renders the new list of users
+        // renders the new list of users
         userListDiv.innerHTML = ''; // Clear current list
         const socketIDs = Object.keys(usersObj);
         if (socketIDs.length === 0) 
@@ -413,11 +459,32 @@ document.addEventListener('DOMContentLoaded', () => {
             if (usersObj[id]) 
             {
                 const userElement = document.createElement('div');
-                userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeaders && localRoomObj.roomLeaders[id] ? ' (Leader)' : '');
-                userElement.id = `user-${id}`; // Ensure unique ID for potential styling/manipulation
+                userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeader && localRoomObj.roomLeader[id] ? ' (Leader)' : '');
+                userElement.id = `user-${id}`; // Ensure unique user-based ID for each listed user in the left panel
+                
+                const makeLeaderButton = document.createElement('button');
+                makeLeaderButton.classList.add('make-leader-button');
+               
+                makeLeaderButton.innerText = 'Make Leader';
+                makeLeaderButton.addEventListener('click', handleLeaderChange())
+
+                // Ensures the button to make someone else the leader only appears if the current person is a leader
+                if (isRoomLeader && !localRoomObj.roomLeader[id])
+                {
+                    makeLeaderButton.id = `button-user-${id}`;
+                    userElement.appendChild(makeLeaderButton);
+
+                }
+
                 userListDiv.appendChild(userElement);
             }
         }
+        
+    }
+
+    //! implement
+    function handleLeaderChange() 
+    {
         
     }
 
@@ -547,24 +614,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAppState = 'STATE_IN_ROOM';
         updateAppView();
 
-        // After view is rendered, apply video state if player is ready
-        // Should be robust, player might not be ready immediately
-        function applyInitialPlayerState() {
-            if (player && typeof player.seekTo === 'function' && localRoomObj.currentVideoLink) {
-                player.setPlaybackRate(localRoomObj.currentPlaybackRate);
-                player.seekTo(localRoomObj.currentTime, true);
-                if (localRoomObj.videoPaused && player.getPlayerState() !== YT.PlayerState.PAUSED) {
-                    player.pauseVideo();
-                } else if (!localRoomObj.videoPaused && player.getPlayerState() !== YT.PlayerState.PLAYING) {
-                    player.playVideo();
-                }
-            } else if (localRoomObj.currentVideoLink) { // If video link exists but player not ready, retry
-                setTimeout(applyInitialPlayerState, 500);
-            }
-        }
-        if (localRoomObj.currentVideoLink) {
-             setTimeout(applyInitialPlayerState, 750); // Initial delay for player API
-        }
+        // Previously implemented applyInitialState function here
+        // Currently the 'onPlayerReady' function will now handle the initial seeking and play/pause state based on the localRoomObj that has just been set.
     });
 
     socket.on('room-join-fail', () => {
@@ -581,7 +632,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ensure the data is valid before updating the local `users` object to match server data
             if (usersInRoom_fromServer && typeof usersInRoom_fromServer === "object") 
             {
-                usersObj = usersInRoom_fromServer;
+                usersObj = usersInRoom_fromServer; // Update local copy of usersObj
+                localRoomObj.users = usersInRoom_fromServer; // Mirror this update in the users object contained within localRoomObj
+
                 console.log(`new users list is: ${JSON.stringify(usersObj)}`);
                 renderUsersList();
             }
@@ -592,6 +645,50 @@ document.addEventListener('DOMContentLoaded', () => {
 
         }
     
+    });
+
+    //! finish implementeing (move to /modify with the other function for handleLeaderChange?)
+    socket.on('new-leader-assigned', ({newLeaderSocketID_fromServer, newLeaderUsername_fromServer}) => {
+        console.log(`New leader assigned with username: ${newLeaderUsername_fromServer}`);
+
+        // Update the local room object
+        if (localRoomObj) 
+        {
+            localRoomObj.roomLeader = { [newLeaderSocketID_fromServer] : newLeaderUsername_fromServer };
+        }
+
+        // Find the video submit in the current DOM and submit form
+        const submitVideoButton = document.getElementById('submit-videolink-button');
+        const videoLinkInput = document.getElementById('videolink-input');
+
+        // Check if THIS client is the new leader
+        if (newLeaderSocketID_fromServer === socketID) 
+        {
+            isRoomLeader = true;
+            if (submitVideoButton && videoLinkInput)
+            {
+                submitVideoButton.removeAttribute('disabled');
+                videoLinkInput.removeAttribute('disabled');
+                videoLinkInput.setAttribute('placeholder' , 'Enter YouTube Video URL')
+                
+            }
+            console.log ("You are now the room leader!");
+        }
+        else 
+        {
+            // If this client is no longer the leader (e.g. in the case of manual transfer)
+            isRoomLeader = false;
+            if (submitVideoButton && videoLinkInput)
+            {
+                submitVideoButton.setAttribute('disabled', 'true');
+                videoLinkInput.setAttribute('disabled', 'true');
+                videoLinkInput.setAttribute('placeholder' , 'Only room leader can change video')
+            }
+        }
+
+        // Re-render the user list to show who is the new leader // ?(maybe with a crown emoji as an indicator)
+        renderUsersList();
+
     });
 
     //Listens for when a message is received, if connected to the/any room
@@ -641,12 +738,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('videoTime-set', (time_fromServer) => {
-        if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) {
+        if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) 
+        {
             if (Math.abs(player.getCurrentTime() - time_fromServer) > 2) { // Only seek if significant diff
                 player.seekTo(time_fromServer, true); // true for allowSeekAhead
                 console.log(`Playback time updated to: ${time_fromServer} seconds by server.`);
             }
         }
+        else 
         {
             console.warn("Issue when receiving/setting videoTime-set req from server");
         }

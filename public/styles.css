@@ -52,12 +52,18 @@ body {
     border-color:black;
     border-style:solid;
     background-color:#9cb8be;
-    
+
 }
 
 #user-list div {
     background-color: #394657;
     padding: 5px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    flex-direction: row;
 }
 
 #user-list div:nth-child(2n) {
