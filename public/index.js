@@ -26,7 +26,8 @@ let socketID = "";
 let isRoomLeader = false; 
 let localRoomObj = ""; //room Obj containing inner users object, user count (int), current roomLeader object, messages object, current video link, currentTime, currentPlaybackRate
 let usersObj = {}  
-let roomID;
+let roomID = "";
+let playerReady = false;
 
 
 //?------------YT API MUST BE IN GLOBAL SCOPE AS IS DONE HERE, NOT WITHIN `DOMContentLoaded`---------//
@@ -75,6 +76,8 @@ function initializePlayer() {
 
 function onPlayerReady(event) {
     console.log('onPlayerReady called');
+    playerReady = true;
+
     const playerInstance = event.target // More descriptive name for the player
 
     const iframe = document.getElementById('yt-iframe');
@@ -126,11 +129,11 @@ function onPlayerReady(event) {
  //-1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 4: video cued
 function onPlayerStateChange(event) {                       
     console.log('Player state changed to:', event.data);
-    console.log(`Current time: ${Math.floor(player.getCurrentTime())}`);
+    console.log(`Current time: ${Math.abs(player.getCurrentTime())} `);
     
     if (event.data === 1 && isRoomLeader) 
     {
-        let currentTime = Math.floor(player.getCurrentTime());
+        let currentTime = Math.abs(player.getCurrentTime()); 
         socket.emit('set-videoTime', {currentTime, roomID});  
         socket.emit('play-video', {play_message:'Video played', roomID});
     }
@@ -466,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 makeLeaderButton.classList.add('make-leader-button');
                
                 makeLeaderButton.innerText = 'Make Leader';
-                makeLeaderButton.addEventListener('click', handleLeaderChange())
+                makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChange(event)})
 
                 // Ensures the button to make someone else the leader only appears if the current person is a leader
                 if (isRoomLeader && !localRoomObj.roomLeader[id])
@@ -483,9 +486,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     //! implement
-    function handleLeaderChange() 
+    function handleManualLeaderChange(event) 
     {
-        
+        previousLeaderID = socketID;
+        newLeaderID = event.getElementById; //trim off "user- " part
+        socket.emit('roomLeader-change', {previousLeaderID : previousLeaderID, newLeaderID : newLeaderID} )
     }
 
 
@@ -585,7 +590,6 @@ document.addEventListener('DOMContentLoaded', () => {
         isRoomLeader = true; //sets boolean to true as the creator of the room
         usersObj = localRoomObj.joined_users //initialize usersObj, mirrors the object contained within roomObJ_fromServer
     
-        
         console.log (`From Server: Room created with ID of ${roomID_fromServer}`);
         console.log(`local roomID variable set as ${roomID} as a result of creating room`);
         console.log(roomObj_fromServer);
@@ -613,10 +617,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         currentAppState = 'STATE_IN_ROOM';
         updateAppView();
-
-        // Previously implemented applyInitialState function here
-        // Currently the 'onPlayerReady' function will now handle the initial seeking and play/pause state based on the localRoomObj that has just been set.
+    
     });
+
+    socket.on('videoTime-UpdateRequest', () => {
+        console.log(`videoTime-UpdateRequest triggered by server as a new person has joined`);
+        if (playerReady && player && localRoomObj){
+            
+            //Update local copy of room object first (not particularly necessary but no impact on function or performance)
+            localRoomObj.currentTime = Math.abs(player.getCurrentTime()); 
+            
+            let currentTime = Math.abs(player.getCurrentTime()); 
+            socket.emit('currentVideoTime-fromLeader', {socketID, roomID, currentTime});
+           
+            console.log("Successfully emitted current time to server");
+        }
+    });
+    
 
     socket.on('room-join-fail', () => {
         console.log(`Room join failed.`);
@@ -647,7 +664,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     });
 
-    //! finish implementeing (move to /modify with the other function for handleLeaderChange?)
+    // Listens for when the server assigns a new leader and updates the client environment  
+    // This should only occur when the existing leader leaves
     socket.on('new-leader-assigned', ({newLeaderSocketID_fromServer, newLeaderUsername_fromServer}) => {
         console.log(`New leader assigned with username: ${newLeaderUsername_fromServer}`);
 
@@ -740,9 +758,9 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('videoTime-set', (time_fromServer) => {
         if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) 
         {
-            if (Math.abs(player.getCurrentTime() - time_fromServer) > 2) { // Only seek if significant diff
+            if (Math.abs(player.getCurrentTime() - time_fromServer) > 1) { // Only seek if time diff is over 1 second
                 player.seekTo(time_fromServer, true); // true for allowSeekAhead
-                console.log(`Playback time updated to: ${time_fromServer} seconds by server.`);
+                console.log(`Playback time updated to: ${time_fromServer} from server.`);
             }
         }
         else 

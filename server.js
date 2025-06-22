@@ -7,10 +7,11 @@
 //      (based on a randomly generated unique roomID each time a room is created) for real-time chat
 // --------------------------------------------------------------------------------------------------------
 
-//Notes
+//Dev Notes
 //---------------------------------------------------------------------------------------------------------
 //io.to(roomID).emit() - Sends to everyone in the room including the sender
 //socket.to(roomID).emit() sends to everyone in the room except the sender
+//io.to(roomLeaderSocketID).emit('name', {info}) - Sends to the room leader only based on socketID
 
 
 "use strict";
@@ -43,7 +44,7 @@ const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. //!
 // A function like should stay defined outside of io.on('connection',...) to avoid a new copy of the function being 
 // created each time a user connects as it does not rely on any variables unique to each connection's closure
     // This function will take care of:
-            // - Removing user from rooms[roomUserWasInID].joined_users
+            // - Removing user from rooms[roomID_ToLeave].joined_users
             // - Decrementing userCount
             // - Removing from roomLeader if applicable
             // - Emitting 'update-users-list' and 'user-left' to the room
@@ -151,13 +152,13 @@ io.on('connection', (socket) => {
       const roomID = generateUniqueID({length:14});
       
       // Prevents room creation in the rare case of a generated ID collision, and in the case of a user trying to create more than 1 active room at once
-      //!implement check if the person is not hosting a room currently, then allow
+      //!implement check if the person is not already hosting a room currently, then allow
       if (!rooms.hasOwnProperty(roomID) && username && username.trim()!== "") 
       {
         rooms[roomID] = {
           joined_users: {},
           userCount: 1,
-          roomLeader:  {},         //Initializes as empty; there should only be 1 room leader at a time, and they may choose to pass the 'remote' to another joined user
+          roomLeader:  {},         //Initializes as empty; should be form {socketID : username} and there should only be 1 room leader at a time, but they may choose to pass the 'remote' to another joined user
           messages: {},            //!implement messages
           currentVideoLink: "",    //Initially empty
           currentTime: 0,          //Default to 0
@@ -219,7 +220,7 @@ io.on('connection', (socket) => {
 
           // Join the socket to the room - order matters here, should occur before emitting updates to clients
           socket.join(req_roomID);
-
+          
           // Notify all clients in the room that a new user has joined
           socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
           io.to(req_roomID).emit('message', `${req_username} has joined!`)
@@ -227,6 +228,11 @@ io.on('connection', (socket) => {
           // Send the updated users list to all users in the room
           console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
           io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
+
+          //Ask the current room leader for the current video time if available
+          //Then trigger 'videoTime-UpdateRequest' only for the room leader client
+          console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
+          io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
           
           //? Server side logs
           console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
@@ -240,6 +246,40 @@ io.on('connection', (socket) => {
       }
 
     }); 
+
+
+    socket.on('currentVideoTime-fromLeader', ({socketID : socketID_fromLeader, roomID : roomID_fromLeader, currentTime : currentTime_fromLeader }) => {
+      // Double check if the reported socketID really is the current room leader, then set the current time and log it server side
+      if (Object.keys(rooms[roomID_fromLeader].roomLeader)[0] === socketID_fromLeader) {
+        rooms[roomID_fromLeader].currentTime = currentTime_fromLeader;
+        console.log(`Success - Server side currentTime value updated to ${currentTime_fromLeader} for room: ${roomID_fromLeader} based on the data pulled from the leader`);
+        
+        setTimeout(() => {
+          socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1); // + 1 (seconds) at the end, to make up for the slight typical buffer delay, improving synchronization
+
+        }, 1000);
+      }
+      else {
+        console.log(`Issue: currentVideoTime-FromLeader attempt failed, the incoming ID does not correspond to the current room leader (room: ${roomID})`)
+      }
+      
+    });
+
+    // Handles when a user joins a room and needs to sync to the current video state.
+    // This should happen after the current time is fetched and updated based on the room leader client.
+    // socket.on('currentVideoTime-Request', ({socketID : socketID_fromClient, roomID : roomID_fromClient}) => {
+      
+    //   let currentTime = rooms[roomID_fromClient].currentTime;
+    //   io.to(socketID_fromClient).emit('current-VideoTime', (currentTime + 4)); // + 4 second forward to make up for the client side 3 second delays
+    // });
+
+
+
+    // Handles when the room leader gives leader status to another joined user
+    socket.on('roomLeader-change', ({previousLeaderID : previousLeaderID, newLeaderID : newLeaderID}) => {
+
+      //!........ IMPLEMENT ...........
+    });
 
 
     // Handles receiving then sending messages
@@ -265,10 +305,12 @@ io.on('connection', (socket) => {
       if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id])
       {
         rooms[roomID_fromClient].currentVideoLink = videoLink_fromClient;
+        rooms[roomID_fromClient].currentTime = 0; // Reset time when a new video is set
         socket.broadcast.to(roomID_fromClient).emit('set-videoLink', rooms[roomID_fromClient].currentVideoLink); // emit video link to all clients except the one who set the link
         console.log(`Current video for room ${roomID_fromClient} set to: ${rooms[roomID_fromClient].currentVideoLink}`);
       }
-      else {
+      else 
+      {
         // User is NOT a leader, or room doesn't exist, or roomLeader object is missing
         socket.emit('error', `Issue: You tried to set the link to ${videoLink_fromClient} but either you are not a room leader or there is an issue with the server data`)
         console.log(`Unauthorized videoLink-set attempt by ${users[socket.id] || socket.id} for room ${roomID_fromClient}`);
@@ -283,14 +325,15 @@ io.on('connection', (socket) => {
         const now = Date.now();
         const socketRateLimit = videoTimeUpdateRateLimit[socket.id] // Use the global rateLimit object
 
-        if (!socketRateLimit || now - socketRateLimit > 250) { // 0.25 second rate limit
+        if (!socketRateLimit || now - socketRateLimit > 250) { // 0.25 second rate limit to prevent too much spam (adjust if needed)
           videoTimeUpdateRateLimit[socket.id] = now;
           rooms[roomID_fromClient].currentTime = time_fromClient;
           
           console.log(`Room ${roomID_fromClient}: Video time updated to: ${rooms[roomID_fromClient].currentTime} by ${users[socket.id]}`);
-          socket.to(roomID_fromClient).emit('videoTime-set', rooms[roomID_fromClient].currentTime+1); //add 1 second to make up for the slight typical buffer delay, improving synchronization
+          socket.to(roomID_fromClient).emit('videoTime-set', rooms[roomID_fromClient].currentTime + 1); // + 1 (seconds) at the end, to make up for the expected slight delay in real world use, improving synchronization
         }
-        else {
+        else 
+        {
           // Optional: log rate limit hit, but can be noisy
           // console.log(`Rate limit hit for set-videoTime by ${socket.id} in room ${roomID_fromClient}`);
         }
@@ -321,12 +364,12 @@ io.on('connection', (socket) => {
     socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => {
       if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id]){
         rooms[roomID_fromClient].videoPaused = true;
-        socket.to(roomID_fromClient).emit('video-paused', 'Video paused by a room leader');
+        socket.to(roomID_fromClient).emit('video-paused', 'Video paused by room leader');
         console.log(pause_message);
         
       }
       else {
-        socket.emit('error', 'You are not a leader or the room is invalid. Cannot pause video for the room.');
+        socket.emit('error', 'You are not the leader or the room is invalid. Cannot pause video.');
         console.log(`Failed pause-video attempt by ${socket.id} for room ${roomID_fromClient}.`);
       }
       
@@ -334,14 +377,18 @@ io.on('connection', (socket) => {
 
     // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2, with verifications for the room ID and room leader status (currently based on socketID)
     socket.on('set-playbackRate', ({playbackRate_eventData: playbackRate_fromClient, roomID : roomID_fromClient}) => {
-      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id]){
+      const allowedRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+      if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id] && allowedRates.includes(playbackRate_fromClient))
+      {
         rooms[roomID_fromClient].currentPlaybackRate = playbackRate_fromClient;
+        
         socket.to(roomID_fromClient).emit('playbackRate-set', rooms[roomID_fromClient].currentPlaybackRate);
+        
         console.log(`player playback rate set to: ${playbackRate_fromClient}`);
 
       }
       else {
-        socket.emit('error', 'You are not a leader or the room is invalid. Cannot set playback rate for the room.');
+        socket.emit('error', 'You are not the leader or the room is invalid. Cannot set playback rate for the room.');
         console.log(`Failed set-playbackRate attempt by ${socket.id} for room ${roomID_fromClient}.`);
       }
       
@@ -368,7 +415,7 @@ io.on('connection', (socket) => {
     // Handles user disconnecting fully (closing the tab / loses connection)
     socket.on('disconnect', () => {
       const disconnectedUsername = users[socket.id] || "Unknown user";
-      let roomUserWasInID = null; // to store the ID of the room the user was in if any
+      let roomID_ToLeave = null; // to store the ID of the room the user was in if any
 
       // Iterate over a copy of room IDs in case a room is modified by handleUserLeavingRoom,
       // find the room first, then call the handler.
@@ -376,15 +423,15 @@ io.on('connection', (socket) => {
       for (const roomID of currentRoomIDs) {
           if (rooms[roomID]?.joined_users?.[socket.id]) 
           {
-              roomUserWasInID = roomID;
+              roomID_ToLeave = roomID;
               break; // This works for the logic that a user can only be in one room at a time
           }
       }
 
       // If the user was in a room, process this by running the helper function
-      if (roomUserWasInID) 
+      if (roomID_ToLeave) 
       {
-        handleUserLeavingRoom(socket, roomUserWasInID);
+        handleUserLeavingRoom(socket, roomID_ToLeave);
       }
       
       // Remove the user from the global users list
@@ -395,9 +442,9 @@ io.on('connection', (socket) => {
 
       // Finalizing log messages for the disconnection
       let logMessage = `User ${disconnectedUsername} (Socket ID: ${socket.id}) has fully disconnected`;
-      if (roomUserWasInID) 
+      if (roomID_ToLeave) 
       {
-          logMessage += ` (was in room ${roomUserWasInID})`;
+          logMessage += ` (was in room ${roomID_ToLeave})`;
       }
       logMessage += `.`;
       console.log(logMessage);
@@ -407,7 +454,7 @@ io.on('connection', (socket) => {
       // Note: If the user wasn't in any room, the 'rooms' object wouldn't have been touched by handleUserLeavingRoom.
       // If they were, handleUserLeavingRoom already called console.table(rooms).
       // So this runs only if no room was affected, as handleUserLeavingRoom would have done it
-      if (!roomUserWasInID) { 
+      if (!roomID_ToLeave) { 
         console.table(rooms);
       }
 
