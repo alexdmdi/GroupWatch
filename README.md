@@ -25,7 +25,7 @@ A real-time web app for watching YouTube videos together, with chat and synchron
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/chatapp.git
+git clone https://github.com/alexdmdi/chatapp.git
 cd chatapp
 npm install
 ```
