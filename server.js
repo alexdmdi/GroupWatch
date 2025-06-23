@@ -38,6 +38,7 @@ app.get(`/`, (req, res) => {
 const rooms = {}; // Room-specific global object containing data and more object(s)
 const users = {}; //! Global list of all users with expected format of {"socketID" : [username, true/false]}? to keep track of if they are in a room or not
 const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. //! should be integrated with setvideo time and maybe other event handlers?
+const MAX_ROOM_SIZE = 20;
 
 
 // Helper function used in socket.on('disconnect') and socket.on('user-leaves-room').
@@ -57,10 +58,9 @@ function handleUserLeavingRoom(socket, roomID)
   // Double check if the room and user (based on ID) exist before doing anything
   if (rooms[roomID] && rooms[roomID].joined_users[socket.id]) 
   {
-     // Get username before deleting
-    const username = rooms[roomID].joined_users[socket.id]; 
+    // Get username before deleting
+    let username = rooms[roomID].joined_users[socket.id]; 
     console.log(`User ${username} (Socket ID: ${socket.id}) is leaving/disconnecting from room ${roomID}`);
-        
         
     // ----------- GENERAL LEAVING LOGIC -------------
         
@@ -96,9 +96,10 @@ function handleUserLeavingRoom(socket, roomID)
         const newLeaderSocketID = remainingUserIDs[0];
         const newLeaderUsername = rooms[roomID].joined_users[newLeaderSocketID];
           
-        rooms[roomID].roomLeader = {newLeaderSocketID : newLeaderUsername};
+        rooms[roomID].roomLeader = {[newLeaderSocketID] : newLeaderUsername};
 
-        console.log (`Leadership automatically transferred to: ${newLeaderUsername}`)
+        // Server Side Notification
+        console.log (`Leadership in room ${roomID} automatically transferred to: ${newLeaderUsername}`)
 
         // Notify everyone in the room about the new leader
         io.to(roomID).emit('new-leader-assigned', {newLeaderSocketID_fromServer : newLeaderSocketID, newLeaderUsername_fromServer: newLeaderUsername});
@@ -206,7 +207,6 @@ io.on('connection', (socket) =>
   socket.on('join-room', ({ req_socketID, req_roomID, req_username }) => 
   {
     console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
-      
     // Validate inputs
     if (!req_socketID || !req_roomID || !req_username || !req_username.trim()) 
     {
@@ -218,33 +218,41 @@ io.on('connection', (socket) =>
     // Check if room exists
     if (rooms.hasOwnProperty(req_roomID)) 
     {
-      console.log(`User ${req_username} is joining room ${req_roomID}`);
+      if (rooms[req_roomID].userCount <= MAX_ROOM_SIZE)
+      {
+        console.log(`User ${req_username} is joining room ${req_roomID}`);
           
-      // Add user to the respective room objects inner user object
-      rooms[req_roomID].joined_users[req_socketID] = req_username; 
+        // Add user to the respective room objects inner user object
+        rooms[req_roomID].joined_users[req_socketID] = req_username; 
           
-      // Increment user count
-      rooms[req_roomID].userCount++;
+        // Increment user count
+        rooms[req_roomID].userCount++;
 
-      // Join the socket to the room - order matters here, should occur before emitting updates to clients
-      socket.join(req_roomID);
+        // Join the socket to the room - order matters here, should occur before emitting updates to clients
+        socket.join(req_roomID);
           
-      // Notify all clients in the room that a new user has joined
-      socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
-      io.to(req_roomID).emit('message', `${req_username} has joined!`)
+        // Notify all clients in the room that a new user has joined
+        socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
+        io.to(req_roomID).emit('message', `${req_username} has joined!`)
           
-      // Send the updated users list to all users in the room
-      console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
-      io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
+        // Send the updated users list to all users in the room
+        console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
+        io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
 
-      //Ask the current room leader for the current video time if available
-      //Then trigger 'videoTime-UpdateRequest' only for the room leader client
-      console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
-      io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
+        //Ask the current room leader for the current video time if available
+        //Then trigger 'videoTime-UpdateRequest' only for the room leader client
+        console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
+        io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
           
-      //? Server side logs
-      console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
-      console.table(rooms);
+        //? Server side logs
+        console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
+        console.table(rooms);
+        }
+        else 
+        {
+          socket.emit('error', "Room is full!");
+        }
+      
 
     }
     else 
@@ -264,7 +272,10 @@ io.on('connection', (socket) =>
       console.log(`Success - Server side currentTime value updated to ${currentTime_fromLeader} for room: ${roomID_fromLeader} based on the data pulled from the leader`);
        
       // + 1 (seconds) at the end, to make up for the slight typical buffer delay, improving synchronization
-      setTimeout(() => {socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1);}, 1000); 
+      setTimeout(() => {
+        socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1);
+        socket.to(roomID_fromLeader).emit('message', "*Auto Syncing Room*");
+      }, 1000); 
     }
     else 
     {
@@ -278,7 +289,7 @@ io.on('connection', (socket) =>
   socket.on('roomLeader-changeRequest', ({previousLeaderID : previousLeaderID, newLeaderID : newLeaderID, roomID : roomID}) => 
   {
   
-    if (Object.key(rooms[roomID].roomLeader)[0] === previousLeaderID){
+    if (Object.keys(rooms[roomID].roomLeader)[0] === previousLeaderID){
       rooms[roomID].roomLeader = {[newLeaderID] : username};
     }
   
