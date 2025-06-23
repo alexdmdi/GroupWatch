@@ -638,13 +638,19 @@ document.addEventListener('DOMContentLoaded', () => {
            
             console.log("Successfully emitted current time to server");
         }
+        else {
+            console.log(`But there currently is no video playing or no video player...`);
+        }
     });
     
 
     socket.on('room-join-fail', () => {
         console.log(`Room join failed.`);
         const statusMsg = document.getElementById('client-status-message');
-        if (statusMsg) statusMsg.innerText = "Failed to join room. Room ID might be invalid or room is full.";
+        if (statusMsg)
+        {
+            statusMsg.innerText = "Failed to join room. Room ID might be invalid, or the room is full.";
+        }
         // No state change
     });
 
@@ -673,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listens for when the server assigns a new leader and updates the client environment  
     // This should only occur when the existing leader leaves
     socket.on('new-leader-assigned', ({newLeaderSocketID_fromServer, newLeaderUsername_fromServer}) => {
-        console.log(`New leader assigned with username: ${newLeaderUsername_fromServer}`);
+        console.log(`New leader assigned: ${newLeaderUsername_fromServer}`);
 
         // Update the local room object
         if (localRoomObj) 
@@ -742,6 +748,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('error', (errorMessage) => {
         console.log(`Error from server: ${errorMessage}`);
         alert(errorMessage); // Optionally show an alert to the user
+        
         // might do a more graceful error display than alert()
         // Potentially a STATE_ERROR and renderErrorView()
     });

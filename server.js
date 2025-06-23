@@ -146,7 +146,7 @@ io.on('connection', (socket) =>
     if (username && username.trim() !== "")
     {
       users[socket.id] = username; // Add user to the global users list
-      socket.emit('username-set', {username: users[socket.id]});
+      socket.emit('username-set', (users[socket.id]));
       console.log(`User ${username} connected with socket ID: ${socket.id}`);
     }
     
@@ -208,52 +208,54 @@ io.on('connection', (socket) =>
   {
     console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
     // Validate inputs
-    if (!req_socketID || !req_roomID || !req_username || !req_username.trim()) 
+    if (!req_socketID || !req_roomID || !req_username) 
     {
       console.log(`Invalid join request: ${JSON.stringify({ req_socketID, req_roomID, req_username })}`);
       socket.emit('room-join-fail');
+      return;
+    }
+
+    // Enforce room size limit
+    if (rooms[req_roomID].userCount >= MAX_ROOM_SIZE)
+    {
+      socket.emit('error', 'Room is full!');
+      socket.emit('room-join-fail');
+
+      console.log(`User ${req_username} failed to join room: ${req_roomID} because the room is full.`);
       return;
     }
       
     // Check if room exists
     if (rooms.hasOwnProperty(req_roomID)) 
     {
-      if (rooms[req_roomID].userCount <= MAX_ROOM_SIZE)
-      {
-        console.log(`User ${req_username} is joining room ${req_roomID}`);
+      console.log(`User ${req_username} is joining room ${req_roomID}`);
           
-        // Add user to the respective room objects inner user object
-        rooms[req_roomID].joined_users[req_socketID] = req_username; 
+      // Add user to the respective room objects inner user object
+      rooms[req_roomID].joined_users[req_socketID] = req_username; 
           
-        // Increment user count
-        rooms[req_roomID].userCount++;
+      // Increment user count
+      rooms[req_roomID].userCount++;
 
-        // Join the socket to the room - order matters here, should occur before emitting updates to clients
-        socket.join(req_roomID);
+      // Join the socket to the room - order matters here, should occur before emitting updates to clients
+      socket.join(req_roomID);
           
-        // Notify all clients in the room that a new user has joined
-        socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
-        io.to(req_roomID).emit('message', `${req_username} has joined!`)
+      // Notify all clients in the room that a new user has joined
+      socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
+      io.to(req_roomID).emit('message', `${req_username} has joined!`)
           
-        // Send the updated users list to all users in the room
-        console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
-        io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
+      // Send the updated users list to all users in the room
+      console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
+      io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
 
-        //Ask the current room leader for the current video time if available
-        //Then trigger 'videoTime-UpdateRequest' only for the room leader client
-        console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
-        io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
+      //Ask the current room leader for the current video time if available
+      //Then trigger 'videoTime-UpdateRequest' only for the room leader client
+      console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
+      io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
           
-        //? Server side logs
-        console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
-        console.table(rooms);
-        }
-        else 
-        {
-          socket.emit('error', "Room is full!");
-        }
-      
-
+      //? Server side logs
+      console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
+      console.table(rooms);
+    
     }
     else 
     {
@@ -289,10 +291,11 @@ io.on('connection', (socket) =>
   socket.on('roomLeader-changeRequest', ({previousLeaderID : previousLeaderID, newLeaderID : newLeaderID, roomID : roomID}) => 
   {
   
-    if (Object.keys(rooms[roomID].roomLeader)[0] === previousLeaderID){
+    if (Object.keys(rooms[roomID].roomLeader)[0] === previousLeaderID)
+    {
       rooms[roomID].roomLeader = {[newLeaderID] : username};
     }
-  
+    //! FINISH
 
   });
 
