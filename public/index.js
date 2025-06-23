@@ -129,11 +129,11 @@ function onPlayerReady(event) {
  //-1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 4: video cued
 function onPlayerStateChange(event) {                       
     console.log('Player state changed to:', event.data);
-    console.log(`Current time: ${Math.abs(player.getCurrentTime())} `);
+    console.log(`Current time: ${Math.floor(player.getCurrentTime())} `);
     
     if (event.data === 1 && isRoomLeader) 
     {
-        let currentTime = Math.abs(player.getCurrentTime()); 
+        let currentTime = Math.floor(player.getCurrentTime()); 
         socket.emit('set-videoTime', {currentTime, roomID});  
         socket.emit('play-video', {play_message:'Video played', roomID});
     }
@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
                     <button type="submit" id="send-button">Send</button>
                 </form>
-                <button id="leaveRoom-button" style="margin-top: 10px;">Leave Room</button>
+                <button id="leaveRoom-button" type="button" style="margin-top: 10px;">Leave Room</button>
             </aside>
         `;
 
@@ -463,13 +463,13 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 const userElement = document.createElement('div');
                 userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeader && localRoomObj.roomLeader[id] ? ' (Leader)' : '');
-                userElement.id = `user-${id}`; // Ensure unique user-based ID for each listed user in the left panel
+                userElement.id = `userID-${id}`; // Ensure unique user-based ID for each listed user in the left panel
                 
                 const makeLeaderButton = document.createElement('button');
                 makeLeaderButton.classList.add('make-leader-button');
-               
+                makeLeaderButton.type = 'button';
                 makeLeaderButton.innerText = 'Make Leader';
-                makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChange(event)})
+                makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChangeRequest(event)})
 
                 // Ensures the button to make someone else the leader only appears if the current person is a leader
                 if (isRoomLeader && !localRoomObj.roomLeader[id])
@@ -486,11 +486,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     //! implement
-    function handleManualLeaderChange(event) 
+    function handleManualLeaderChangeRequest(event) 
     {
-        previousLeaderID = socketID;
-        newLeaderID = event.getElementById; //trim off "user- " part
-        socket.emit('roomLeader-change', {previousLeaderID : previousLeaderID, newLeaderID : newLeaderID} )
+        const newLeaderID = event.target.id.replace('button-user-', '');
+        const previousLeaderID = socketID;
+        console.log(`New Leader socketID: ${newLeaderID}`);
+
+        socket.emit('roomLeader-changeRequest', {previousLeaderID, newLeaderID, roomID});
+    }
+
+    function handleLeaderChange() {
+
     }
 
 
@@ -625,9 +631,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (playerReady && player && localRoomObj){
             
             //Update local copy of room object first (not particularly necessary but no impact on function or performance)
-            localRoomObj.currentTime = Math.abs(player.getCurrentTime()); 
+            localRoomObj.currentTime = Math.floor(player.getCurrentTime()); 
             
-            let currentTime = Math.abs(player.getCurrentTime()); 
+            let currentTime = Math.floor(player.getCurrentTime()); 
             socket.emit('currentVideoTime-fromLeader', {socketID, roomID, currentTime});
            
             console.log("Successfully emitted current time to server");
@@ -758,7 +764,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('videoTime-set', (time_fromServer) => {
         if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) 
         {
-            if (Math.abs(player.getCurrentTime() - time_fromServer) > 1) { // Only seek if time diff is over 1 second
+            if (Math.floor(player.getCurrentTime() - time_fromServer) > 1) { // Only seek if time diff is over 1 second
                 player.seekTo(time_fromServer, true); // true for allowSeekAhead
                 console.log(`Playback time updated to: ${time_fromServer} from server.`);
             }
