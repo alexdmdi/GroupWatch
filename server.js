@@ -93,7 +93,7 @@ function handleUserLeavingRoom(socket, roomID)
       if (rooms[roomID].userCount > 0) 
       {
         const remainingUserIDs = Object.keys(rooms[roomID].joined_users); // Array of IDs from the nested joined_users object
-        const newLeaderSocketID = remainingUserIDs[0];
+        const newLeaderSocketID = remainingUserIDs[0]; // Select the next person who joined closest in order after the previous leader
         const newLeaderUsername = rooms[roomID].joined_users[newLeaderSocketID];
           
         rooms[roomID].roomLeader = {[newLeaderSocketID] : newLeaderUsername};
@@ -102,7 +102,7 @@ function handleUserLeavingRoom(socket, roomID)
         console.log (`Leadership in room ${roomID} automatically transferred to: ${newLeaderUsername}`)
 
         // Notify everyone in the room about the new leader
-        io.to(roomID).emit('new-leader-assigned', {newLeaderSocketID_fromServer : newLeaderSocketID, newLeaderUsername_fromServer: newLeaderUsername});
+        io.to(roomID).emit('new-leader-assigned', {newLeaderID, newLeaderUsername});
       }
     }
     // ----------------------------------------------
@@ -287,15 +287,39 @@ io.on('connection', (socket) =>
     });
 
 
-  // Handles when the room leader gives leader status to another joined user
-  socket.on('roomLeader-changeRequest', ({previousLeaderID : previousLeaderID, newLeaderID : newLeaderID, roomID : roomID}) => 
+  // Handles when the room leader wants to give leader status to another user in the room
+  socket.on('roomLeader-changeRequest', ({newLeaderID, roomID}) => 
   {
-  
-    if (Object.keys(rooms[roomID].roomLeader)[0] === previousLeaderID)
+    console.log(`Manual change request triggered for room leader in room ${roomID}`);
+    
+    // Security checks
+    // 1. Does the room exist
+    // 2. Is the person making the request (socket.id) the current leader?
+    // 3. Does the target user (newLeaderID) actually exist in the room?
+    if (rooms[roomID] && rooms[roomID].roomLeader[socket.id] && rooms[roomID].joined_users[newLeaderID])
     {
-      rooms[roomID].roomLeader = {[newLeaderID] : username};
+      // Extra check in the unexpected event (bug) more than one leader is set in the roomLeader object at the time of this request
+      if (Object.keys(rooms[roomID].roomLeader).length > 1) 
+      {
+        console.log("BUG: At the time of this room leader change request, there were multiple leaders in the roomLeader obj", rooms[roomID].roomLeader);
+      }
+    
+      // Continue either way and assign the new leader then trigger new-leader-assigned on client side for the whole room
+      const newLeaderUsername = rooms[roomID].joined_users[newLeaderID];
+      rooms[roomID].roomLeader = {[newLeaderID] : [newLeaderUsername]};
+      
+      io.to(roomID).emit('new-leader-assigned', {newLeaderID, newLeaderUsername});
+      
+      console.log(`Emitted new leader ID to all clients in room ${roomID}`);
+      console.table(rooms);
+
     }
-    //! FINISH
+    else 
+    {
+        console.log(`Error completing roomLeader-changeRequest: The client attempting to change the room leader isn't currently the leader, or the room does not exist, or the newly appointed leader does not exist.`);
+        socket.emit('error', 'Server: Failed to assign new leader. Either you are the not the leader, or the chosen person is not valid, or the room does not exist.');
+    }
+    
 
   });
 

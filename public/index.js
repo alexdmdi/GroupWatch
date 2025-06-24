@@ -434,69 +434,74 @@ document.addEventListener('DOMContentLoaded', () => {
     //? ------ Utility Functions (renderUsersList, setVideo, verifyLink) ----------------------------------------//
     function renderUsersList() 
     {
-        const userListDiv = document.getElementById('user-list');
-        if (!userListDiv)
+        if (currentAppState = 'STATE_IN_ROOM')
         {
-            console.warn("User list container not found in current view.");
-            return;
-        }
+            const userListDiv = document.getElementById('user-list');
         
-        // Ensure users is a valid object
-        if (!usersObj || typeof usersObj !== "object") 
-        {
-            console.log("Users list is not available or invalid.");
-            userListDiv.innerHTML = '<li>No user data.</li>';
-            return;
-        }
-
-        // renders the new list of users
-        userListDiv.innerHTML = ''; // Clear current list
-        const socketIDs = Object.keys(usersObj);
-        if (socketIDs.length === 0) 
-        {
-            userListDiv.innerHTML = '<li>No users in room.</li>';
-            return;
-        }
-        for (const id of socketIDs) 
-        {
-            if (usersObj[id]) 
+            if (!userListDiv)
             {
+                console.warn("User list container not found in current view.");
+                return;
+            }
+        
+            // Ensure users is a valid object
+            if (!usersObj || typeof usersObj !== "object") 
+            {
+                console.log("Users list is not available/invalid.");
+                userListDiv.innerHTML = '<li>No joined users object.</li>';
+                return;
+            }
+            
+            // First clear the current list
+            userListDiv.innerHTML = '';
+
+            // Setup array of the IDs of the currently joined users
+            const joinedUsers_socketIDs = Object.keys(usersObj);
+            
+            // Ensure users object/array is not empty
+            if (joinedUsers_socketIDs.length === 0) 
+            {
+                console.log('Unexpected: The usersObj seems to be empty.');
+                userListDiv.innerHTML = '<li>No users in room.</li>';
+                return;
+            }
+        
+            // For each id (joiner user), setup a user element and 'make leader' button and conditionally append the button
+            for (const id of joinedUsers_socketIDs) 
+            {
+    
                 const userElement = document.createElement('div');
-                userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeader && localRoomObj.roomLeader[id] ? ' (Leader)' : '');
+                // userElement.style = "display: flex; justify-content: space-between;";
+                userElement.innerText = usersObj[id] + (localRoomObj && localRoomObj.roomLeader && localRoomObj.roomLeader[id] ? '     👑' : '');
                 userElement.id = `userID-${id}`; // Ensure unique user-based ID for each listed user in the left panel
-                
+            
                 const makeLeaderButton = document.createElement('button');
                 makeLeaderButton.classList.add('make-leader-button');
                 makeLeaderButton.type = 'button';
                 makeLeaderButton.innerText = 'Make Leader';
+                makeLeaderButton.id = `button-user-${id}`;
                 makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChangeRequest(event)})
-
-                // Ensures the button to make someone else the leader only appears if the current person is a leader
+                
+                // Ensures 'make leader' button only appears to the room leader, for other non leaders in the room 
                 if (isRoomLeader && !localRoomObj.roomLeader[id])
                 {
-                    makeLeaderButton.id = `button-user-${id}`;
                     userElement.appendChild(makeLeaderButton);
-
+            
                 }
-
                 userListDiv.appendChild(userElement);
+
             }
         }
         
     }
 
-    //! implement
+    
     function handleManualLeaderChangeRequest(event) 
     {
         const newLeaderID = event.target.id.replace('button-user-', '');
-        const previousLeaderID = socketID;
-        console.log(`New Leader socketID: ${newLeaderID}`);
+        socket.emit('roomLeader-changeRequest', {newLeaderID, roomID});
 
-        socket.emit('roomLeader-changeRequest', {previousLeaderID, newLeaderID, roomID});
-    }
-
-    function handleLeaderChange() {
-
+        console.log(`Newly chosen leader has socketID: ${newLeaderID}, executing 'roomLeader-changeRequest'`);
     }
 
 
@@ -630,7 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log(`videoTime-UpdateRequest triggered by server as a new person has joined`);
         if (playerReady && player && localRoomObj){
             
-            //Update local copy of room object first (not particularly necessary but no impact on function or performance)
+            //Update local copy of room object first (not particularly necessary/useful but no impact on function or performance)
             localRoomObj.currentTime = Math.floor(player.getCurrentTime()); 
             
             let currentTime = Math.floor(player.getCurrentTime()); 
@@ -639,7 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Successfully emitted current time to server");
         }
         else {
-            console.log(`But there currently is no video playing or no video player...`);
+            console.log(`(But there is no video playing or the video player could not be hooked onto)...`);
         }
     });
     
@@ -676,48 +681,51 @@ document.addEventListener('DOMContentLoaded', () => {
     
     });
 
-    // Listens for when the server assigns a new leader and updates the client environment  
-    // This should only occur when the existing leader leaves
-    socket.on('new-leader-assigned', ({newLeaderSocketID_fromServer, newLeaderUsername_fromServer}) => {
-        console.log(`New leader assigned: ${newLeaderUsername_fromServer}`);
-
-        // Update the local room object
-        if (localRoomObj) 
-        {
-            localRoomObj.roomLeader = { [newLeaderSocketID_fromServer] : newLeaderUsername_fromServer };
-        }
+    // Listens for when the leader changes and updates the client environment
+    socket.on('new-leader-assigned', ({newLeaderID : newLeaderSocketID_fromServer, newLeaderUsername: newLeaderUsername_fromServer}) => {
+        console.log(`Server Message: Attempting to assign new leader with username ${newLeaderUsername_fromServer}`);
 
         // Find the video submit in the current DOM and submit form
         const submitVideoButton = document.getElementById('submit-videolink-button');
         const videoLinkInput = document.getElementById('videolink-input');
 
-        // Check if THIS client is the new leader
-        if (newLeaderSocketID_fromServer === socketID) 
+        // Update the local room object (and isRoomLeader status only for the new leader client)
+        if (localRoomObj) 
         {
-            isRoomLeader = true;
-            if (submitVideoButton && videoLinkInput)
+            localRoomObj.roomLeader = { [newLeaderSocketID_fromServer] : [newLeaderUsername_fromServer] };
+            
+            // If this client is the new leader, update isRoomLeader boolean and update the DOM, then re-render the users list
+            if (socketID === newLeaderSocketID_fromServer)
             {
-                submitVideoButton.removeAttribute('disabled');
-                videoLinkInput.removeAttribute('disabled');
-                videoLinkInput.setAttribute('placeholder' , 'Enter YouTube Video URL')
-                
+                isRoomLeader = true;
+
+                if (submitVideoButton && videoLinkInput)
+                {
+                    submitVideoButton.removeAttribute('disabled');
+                    videoLinkInput.removeAttribute('disabled');
+                    videoLinkInput.setAttribute('placeholder' , 'Enter YouTube Video URL')
+                }
+                console.log ("You are now the room leader!");
+                renderUsersList();
             }
-            console.log ("You are now the room leader!");
+            else 
+            {
+                // If this client is not currently the leader then ensure isRoomLeader is false, update DOM, re-render the users list
+                isRoomLeader = false;
+
+                if (submitVideoButton && videoLinkInput)
+                {
+                    submitVideoButton.setAttribute('disabled', 'true');
+                    videoLinkInput.setAttribute('disabled', 'true');
+                    videoLinkInput.setAttribute('placeholder' , 'Only room leader can change video')
+                }
+                renderUsersList();
+            }
         }
         else 
         {
-            // If this client is no longer the leader (e.g. in the case of manual transfer)
-            isRoomLeader = false;
-            if (submitVideoButton && videoLinkInput)
-            {
-                submitVideoButton.setAttribute('disabled', 'true');
-                videoLinkInput.setAttribute('disabled', 'true');
-                videoLinkInput.setAttribute('placeholder' , 'Only room leader can change video')
-            }
+            console.warn('Unexpected: localRoomObj missing');
         }
-
-        // Re-render the user list to show who is the new leader // ?(maybe with a crown emoji as an indicator)
-        renderUsersList();
 
     });
 
