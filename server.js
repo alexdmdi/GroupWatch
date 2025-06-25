@@ -102,7 +102,7 @@ function handleUserLeavingRoom(socket, roomID)
         console.log (`Leadership in room ${roomID} automatically transferred to: ${newLeaderUsername}`)
 
         // Notify everyone in the room about the new leader
-        io.to(roomID).emit('new-leader-assigned', {newLeaderID, newLeaderUsername});
+        io.to(roomID).emit('new-leader-assigned', {newLeaderID : newLeaderSocketID, newLeaderUsername : newLeaderUsername});
       }
     }
     // ----------------------------------------------
@@ -306,9 +306,10 @@ io.on('connection', (socket) =>
     
       // Continue either way and assign the new leader then trigger new-leader-assigned on client side for the whole room
       const newLeaderUsername = rooms[roomID].joined_users[newLeaderID];
-      rooms[roomID].roomLeader = {[newLeaderID] : [newLeaderUsername]};
+      rooms[roomID].roomLeader = {[newLeaderID] : newLeaderUsername};
       
       io.to(roomID).emit('new-leader-assigned', {newLeaderID, newLeaderUsername});
+      io.to(roomID).emit('message', `${newLeaderUsername} is now the leader 👑`);
       
       console.log(`Emitted new leader ID to all clients in room ${roomID}`);
       console.table(rooms);

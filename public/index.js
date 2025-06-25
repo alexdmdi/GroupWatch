@@ -480,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 makeLeaderButton.type = 'button';
                 makeLeaderButton.innerText = 'Make Leader';
                 makeLeaderButton.id = `button-user-${id}`;
-                makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChangeRequest(event)})
+                makeLeaderButton.addEventListener('click', (event) => {handleManualLeaderChangeRequest(id)})
                 
                 // Ensures 'make leader' button only appears to the room leader, for other non leaders in the room 
                 if (isRoomLeader && !localRoomObj.roomLeader[id])
@@ -496,12 +496,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     
-    function handleManualLeaderChangeRequest(event) 
+    function handleManualLeaderChangeRequest(targetSocketID) 
     {
-        const newLeaderID = event.target.id.replace('button-user-', '');
-        socket.emit('roomLeader-changeRequest', {newLeaderID, roomID});
-
-        console.log(`Newly chosen leader has socketID: ${newLeaderID}, executing 'roomLeader-changeRequest'`);
+        socket.emit('roomLeader-changeRequest', {newLeaderID : targetSocketID, roomID : roomID});
+        console.log(`Newly chosen leader has socketID: ${targetSocketID}, executing 'roomLeader-changeRequest'`);
     }
 
 
@@ -779,14 +777,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('videoTime-set', (time_fromServer) => {
         if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) 
         {
-            if (Math.floor(player.getCurrentTime() - time_fromServer) > 1) { // Only seek if time diff is over 1 second
-                player.seekTo(time_fromServer, true); // true for allowSeekAhead
-                console.log(`Playback time updated to: ${time_fromServer} from server.`);
-            }
+            player.seekTo(time_fromServer, true); // true for allowSeekAhead
+            console.log(`Playback time updated to: ${time_fromServer} from server.`); 
         }
         else 
         {
-            console.warn("Issue when receiving/setting videoTime-set req from server");
+            console.warn("Issue when receiving/setting videoTime-set request from server");
         }
     });
 
