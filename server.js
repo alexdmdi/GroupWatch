@@ -32,10 +32,12 @@ app.get(`/`, (req, res) => {
 })
 
 // Global Variables, initialized as empty
+//------------------------------------------------------------------------------------
 const rooms = {}; // Room-specific global object containing data and more object(s)
 const users = {}; // Global list of all users, expected format is {socketID : username} //!Potential format {"socketID" : [username, true/false]} to keep track if a user is in a room or not
 const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. Should be integrated with setvideo-time and perhaps other event handlers?
 const MAX_ROOM_SIZE = 20;
+//------------------------------------------------------------------------------------
 
 
 //Helper function that checks if a user is already a member of any room. Used in 'create-room' and 'join-room'
@@ -160,7 +162,7 @@ io.on('connection', (socket) =>
   // Handles a new user setting their username //! make more robust with uniqueness? or perhaps not needed if unique background ID handles it (currently socket.id's)
   socket.on('new-user', (username) => 
   {
-    if (username && username.trim() !== "")
+    if (username && username.trim() !== "" && typeof username === "string")
     {
       users[socket.id] = username; // Add user to the global users object { socketID : username }
       socket.emit('username-set', (users[socket.id]));
@@ -234,8 +236,8 @@ io.on('connection', (socket) =>
   // Handles joining a room
   socket.on('join-room', ({ req_username, req_roomID }) => 
   {
-    console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
     const req_socketID = socket.id;
+    console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
 
     // Validate inputs
     if (!req_socketID || !req_roomID || !req_username) 
@@ -288,8 +290,8 @@ io.on('connection', (socket) =>
 
       //! Ask the current room leader for the current video time if available
       //! Then trigger 'videoTime-UpdateRequest' only for the room leader client
-      //! console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
-      //! io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
+       console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
+       io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest'); //! remove these once fixed/redone
           
       //? Server side logs
       console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);

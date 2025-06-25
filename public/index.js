@@ -328,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         const usernameInput = document.getElementById('username-input');
 
-        if (usernameInput && usernameInput.value.trim()) 
+        if (usernameInput && usernameInput.value.trim() && typeof usernameInput.value === "string") 
         {          
             const proposedUsername = usernameInput.value.trim();
             // Basic sanitization: allow letters, numbers, spaces, underscores, hyphens. Max length.
@@ -364,7 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const roomJoinInput = document.getElementById('roomJoin-input');
         const statusMsg = document.getElementById('client-status-message');
 
-        if (roomJoinInput && roomJoinInput.value.trim()) {
+        if (roomJoinInput && roomJoinInput.value.trim() && typeof roomJoinInput.value === "string") {
             if (statusMsg) statusMsg.innerText = "Joining room...";
             const req_roomID = roomJoinInput.value.trim();
             socket.emit('join-room', { req_username: username, req_roomID : req_roomID });
@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     {
         event.preventDefault();
         const videoLinkInput = document.getElementById('videolink-input');
-        if (videoLinkInput && videoLinkInput.value.trim() && isRoomLeader) 
+        if (isRoomLeader && videoLinkInput && videoLinkInput.value.trim() && typeof videoLinkInput.value === "string") 
         {
             const rawLink = videoLinkInput.value.trim();
             const verifiedLink = verifyLink(rawLink); // verifyLink is your existing function
@@ -407,8 +407,8 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         const messageInput = document.getElementById('message-input');
 
-        //("if connected" condition enforced by local verification paired with backup server verification)
-        if (messageInput && messageInput.value.trim() && roomID && localRoomObj) 
+        //("if conditions enforced by server verification as well)
+        if (messageInput && messageInput.value.trim() && roomID && localRoomObj && typeof messageInput.value === "string" ) 
         {
             const message = messageInput.value.trim();
             socket.emit('sendMessage', { message, username, roomID }); // Send an obj containing the message, and roomID to the server
@@ -566,7 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }   
 
 
-    function setVideo(link) //verifyLink should run before this happens
+    function setVideo(link) // VerifyLink should run before this happens
     { 
         const videoWrapper = document.getElementById('video-wrapper');
         if (!videoWrapper) 
@@ -574,7 +574,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("Video wrapper not found");
             return;
         }
-        if (username && roomID) // Checks if user is in a room context
+        
+        // Verify if user is in a room context and if link input is of type string
+        if (username && roomID && typeof link === "string") 
         {
             console.log(`The link was set to: ${link}`)
             videoWrapper.innerHTML = `<iframe id="yt-iframe" width="640" height="360" src="${link}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
