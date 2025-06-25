@@ -2,16 +2,14 @@
 // 1) Express serves the static HTML file that includes the client-side JavaScript for Socket.IO (the stuff in public folder in this case)
 // 2) When the HTML file is loaded in the browser, the client-side JavaScript connects to the server via WebSocket using Socket.IO
 // 3) Socket.IO handles real-time communication, listening for emits events between the server and connected clients
-// 4) The server side socket listens for various things
-// 4.1) For example: message events from clients, so it can then broadcast the message to all other clients in the given room 
-//      (based on a randomly generated unique roomID each time a room is created) for real-time chat
+// 4) The server side socket listens for various things such as messages from clients, and it also broadcasts/emits to clients/rooms (each room has a uniqueID)
 // --------------------------------------------------------------------------------------------------------
 
 //Dev Notes
 //---------------------------------------------------------------------------------------------------------
-//io.to(roomID).emit() - Sends to everyone in the room including the sender
-//socket.to(roomID).emit() sends to everyone in the room except the sender
-//io.to(roomLeaderSocketID).emit('name', {info}) - Sends to the room leader only based on socketID
+//io.to(roomID).emit()     - Sends to everyone in the room including the sender
+//socket.to(roomID).emit() - Sends to everyone in the room except the sender
+//io.to(roomLeaderSocketID).emit('foobar', {data}) - Sends to the room leader only based on socketID
 
 
 "use strict";
@@ -24,7 +22,6 @@ const generateUniqueID = require('generate-unique-id'); // For generating unique
 const app = express(); // Creates an instance of an Express application
 const server = http.createServer(app);
 const io = socketIo(server); // Initializes Socket.IO with the HTTP server. The 'io' object is used to handle WebSocket connections
-
 
 
 app.use(express.static(__dirname + '/public')); // For serving static files from the 'public' folder. When a request is made to the server it will look for files in this folder and serve them if they exist
@@ -154,8 +151,9 @@ io.on('connection', (socket) =>
   });
 
   // Handles room creation
-  socket.on('create-room', ({username, socketID}) => 
+  socket.on('create-room', ({username}) => 
   {
+    const socketID = socket.id;
     const roomID = generateUniqueID({length:14});
       
     // Prevents room creation in the rare case of a generated ID collision, and in the case of a user trying to create more than 1 active room at once
@@ -204,9 +202,11 @@ io.on('connection', (socket) =>
 
     
   // Handles joining a room
-  socket.on('join-room', ({ req_socketID, req_roomID, req_username }) => 
+  socket.on('join-room', ({ req_username, req_roomID }) => 
   {
     console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
+    const req_socketID = socket.id;
+
     // Validate inputs
     if (!req_socketID || !req_roomID || !req_username) 
     {
@@ -247,10 +247,10 @@ io.on('connection', (socket) =>
       console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
       io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
 
-      //Ask the current room leader for the current video time if available
-      //Then trigger 'videoTime-UpdateRequest' only for the room leader client
-      console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
-      io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
+      //! Ask the current room leader for the current video time if available
+      //! Then trigger 'videoTime-UpdateRequest' only for the room leader client
+      //! console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
+      //! io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest');
           
       //? Server side logs
       console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
@@ -266,9 +266,11 @@ io.on('connection', (socket) =>
   }); 
 
 
-  socket.on('currentVideoTime-fromLeader', ({socketID : socketID_fromLeader, roomID : roomID_fromLeader, currentTime : currentTime_fromLeader }) => {
+  socket.on('currentVideoTime-fromLeader', ({roomID : roomID_fromLeader, currentTime : currentTime_fromLeader }) => {
+    const socketID_fromLeader = socket.id;
+    
     // Double check if the reported socketID really is the current room leader, then set the current time and log it server side
-    if (Object.keys(rooms[roomID_fromLeader].roomLeader)[0] === socketID_fromLeader) 
+    if (rooms[roomID_fromLeader] && rooms[roomID_fromLeader].roomLeader[socketID_fromLeader]) 
     {
       rooms[roomID_fromLeader].currentTime = currentTime_fromLeader;
       console.log(`Success - Server side currentTime value updated to ${currentTime_fromLeader} for room: ${roomID_fromLeader} based on the data pulled from the leader`);
@@ -276,7 +278,7 @@ io.on('connection', (socket) =>
       // + 1 (seconds) at the end, to make up for the slight typical buffer delay, improving synchronization
       setTimeout(() => {
         socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1);
-        socket.to(roomID_fromLeader).emit('message', "*Auto Syncing Room*");
+        socket.to(roomID_fromLeader).emit('message', "*Syncing Room*");
       }, 1000); 
     }
     else 
