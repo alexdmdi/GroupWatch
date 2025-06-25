@@ -17,7 +17,7 @@
 const express = require('express');    // This imports the Express library
 const http = require('http');          // Creates an HTTP server using Express. This is needed because Socket.IO works with HTTP server to enable WebSocket communication
 const socketIo = require('socket.io'); // Imports socketIO for handling real-time bidirectional communication between the client and server, like for a live chat in this case
-const generateUniqueID = require('generate-unique-id'); // For generating unique room IDs //!(and maybe users?)
+const generateUniqueID = require('generate-unique-id'); // For generating unique room IDs //!(and maybe for users instead of relying on socketID?)
 
 const app = express(); // Creates an instance of an Express application
 const server = http.createServer(app);
@@ -33,9 +33,29 @@ app.get(`/`, (req, res) => {
 
 // Global Variables, initialized as empty
 const rooms = {}; // Room-specific global object containing data and more object(s)
-const users = {}; //! Global list of all users with expected format of {"socketID" : [username, true/false]}? to keep track of if they are in a room or not
-const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. //! should be integrated with setvideo time and maybe other event handlers?
+const users = {}; // Global list of all users, expected format is {socketID : username} //!Potential format {"socketID" : [username, true/false]} to keep track if a user is in a room or not
+const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. Should be integrated with setvideo-time and perhaps other event handlers?
 const MAX_ROOM_SIZE = 20;
+
+
+//Helper function that checks if a user is already a member of any room. Used in 'create-room' and 'join-room'
+//@param {string} socketID The socket ID of the user to check.
+//@returns {string|null} The ID of the room the user is in, or null if they are not in any room.
+function getUserRoomID(socketID) 
+{
+    // Object.keys(rooms) gets an array of all current roomIDs
+    for (const roomID of Object.keys(rooms)) 
+    {
+        // For each room, check if the user's socketID exists as a key in its joined_users object.
+        if (rooms[roomID].joined_users[socketID]) 
+        {
+            // If we find it, we don't need to look further, so return the ID of the room they are in.
+            return roomID;
+        }
+    }
+    // If the loop completes without finding the user, they are not in any room.
+    return null;
+}
 
 
 // Helper function used in socket.on('disconnect') and socket.on('user-leaves-room').
@@ -142,7 +162,7 @@ io.on('connection', (socket) =>
   {
     if (username && username.trim() !== "")
     {
-      users[socket.id] = username; // Add user to the global users list
+      users[socket.id] = username; // Add user to the global users object { socketID : username }
       socket.emit('username-set', (users[socket.id]));
       console.log(`User ${username} connected with socket ID: ${socket.id}`);
     }
@@ -154,10 +174,20 @@ io.on('connection', (socket) =>
   socket.on('create-room', ({username}) => 
   {
     const socketID = socket.id;
+
+    // Verify if the user is already in a room and prevent their request
+    const existingRoom = getUserRoomID(socketID);
+    if (existingRoom) 
+    {
+      console.log(`User ${username} with ID ${socketID} tried to create a room but is already in room ${existingRoom}`);
+      socket.emit('error', `You are already in room ${existingRoom}. Please leave that room before creating a new one.`);
+      return; // stop the create-room block here
+    }
+
+    // If no issues so far, setup a unique and random roomID 
     const roomID = generateUniqueID({length:14});
       
-    // Prevents room creation in the rare case of a generated ID collision, and in the case of a user trying to create more than 1 active room at once
-    //!implement check if the person is not already hosting a room currently, then allow
+    // Prevents room creation in the extremely rare case of a generated ID collision
     if (!rooms.hasOwnProperty(roomID) && username && username.trim()!== "") 
     {
       rooms[roomID] = 
@@ -215,6 +245,15 @@ io.on('connection', (socket) =>
       return;
     }
 
+    // Verify if the user is already in a room
+    const existingRoom = getUserRoomID(req_socketID);
+    if (existingRoom)
+    {
+      console.log(`User ${req_username} tried to join room ${req_roomID} but is already in room ${existingRoom}`);
+      socket.emit('error', `You are already in room ${existingRoom}, please leave that room first`);
+      return; // Stop the whole function here
+    }
+
     // Enforce room size limit
     if (rooms[req_roomID].userCount >= MAX_ROOM_SIZE)
     {
@@ -269,13 +308,13 @@ io.on('connection', (socket) =>
   socket.on('currentVideoTime-fromLeader', ({roomID : roomID_fromLeader, currentTime : currentTime_fromLeader }) => {
     const socketID_fromLeader = socket.id;
     
-    // Double check if the reported socketID really is the current room leader, then set the current time and log it server side
+    // Verify that the incoming socketID really is the current room leader, then set the current time
     if (rooms[roomID_fromLeader] && rooms[roomID_fromLeader].roomLeader[socketID_fromLeader]) 
     {
       rooms[roomID_fromLeader].currentTime = currentTime_fromLeader;
       console.log(`Success - Server side currentTime value updated to ${currentTime_fromLeader} for room: ${roomID_fromLeader} based on the data pulled from the leader`);
        
-      // + 1 (seconds) at the end, to make up for the slight typical buffer delay, improving synchronization
+      // + 1 (seconds) at the end, to make up for the slight typical buffer delay which should improve true real-time synchronization
       setTimeout(() => {
         socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1);
         socket.to(roomID_fromLeader).emit('message', "*Syncing Room*");
@@ -306,7 +345,7 @@ io.on('connection', (socket) =>
         console.log("BUG: At the time of this room leader change request, there were multiple leaders in the roomLeader obj", rooms[roomID].roomLeader);
       }
     
-      // Continue either way and assign the new leader then trigger new-leader-assigned on client side for the whole room
+      // Continue either way and set the new leader object emit to 'new-leader-assigned' on client side, for the entire room
       const newLeaderUsername = rooms[roomID].joined_users[newLeaderID];
       rooms[roomID].roomLeader = {[newLeaderID] : newLeaderUsername};
       
