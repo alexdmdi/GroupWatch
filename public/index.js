@@ -140,9 +140,7 @@ function onPlayerReady(event)
 
         socket.timeout(5000).emit('request-initial-sync', roomID, (err, stateObj_FromServer) => 
         {
-            //console.log(`Err: ${JSON.stringify(err)}, stateObj_FromServer: ${JSON.stringify(stateObj_FromServer)}`);
-
-            // This is called if the server or leader doesn't respond in time (5 seconds)
+            // Err occurs if the server or leader doesn't respond in time (5 seconds)
             if (err) 
             {
                 console.error("Err: Could not complete initial auto-sync with leader:", err);
@@ -151,11 +149,11 @@ function onPlayerReady(event)
             }
             if (stateObj_FromServer === null || typeof stateObj_FromServer === "undefined")
             {
-                console.warn("Received 'stateFromServer' object that should originate from the leader, but it's null/undefined...");
+                console.warn("Received null or undefined 'stateObj_FromServer' that should originate from the leader...");
                 return;
             }
 
-            // ----- Otherwise state acquired, so continue ------
+            // ----- Otherwise state object acquired, so continue ------
             
             // First Update localRoomObj (even if not crucial/may be redundant)
             if (localRoomObj) 
@@ -178,12 +176,14 @@ function onPlayerReady(event)
                 player.setPlaybackRate(stateObj_FromServer.currentPlaybackRate);
 
                 if (stateObj_FromServer.videoPaused) {
-                    if (player.getPlayerState() !== YT.PlayerState.PAUSED) {
+                    if (player.getPlayerState() !== YT.PlayerState.PAUSED) 
+                    {
                         player.pauseVideo();
                     }
                 } 
                 else {
-                    if (player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                    if (player.getPlayerState() !== YT.PlayerState.PLAYING) 
+                    {
                         player.playVideo();
                     }
                 }
@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () =>
     //? ================ Utility Functions (renderUsersList, setVideo, verifyLink) ===================//
     function renderUsersList() 
     {
-        if (currentAppState = 'STATE_IN_ROOM')
+        if (currentAppState === 'STATE_IN_ROOM')
         {
             const userListDiv = document.getElementById('user-list');
         
@@ -745,11 +745,12 @@ document.addEventListener('DOMContentLoaded', () =>
             // Get the raw player state number (e.g., 1 for playing, 2 for paused);
             const rawPlayerState = player.getPlayerState();
 
-            // Determine if paused without relying on YT.PlayerState constant
-            // Any state that isn't exactly 1 (PLAYING) can be considered "not playing"
+            // Determine if paused without relying on YT.PlayerState constant. Any state that isn't 1 (PLAYING) can be considered "not playing"
             const isPaused = (rawPlayerState !== 1);
 
-            const currentState_fromLeader = {
+            // Setup the object to be sent back to the server in the callback
+            const currentState_fromLeader = 
+            {
                 currentTime: Math.floor(player.getCurrentTime() || 0),  // Default to start of the video if current time not available
                 videoPaused: isPaused, 
                 currentPlaybackRate: player.getPlaybackRate() || 1  // Default to 1.0x playback speed as backup
