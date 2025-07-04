@@ -1,31 +1,29 @@
 "use strict";
+//----------------------------------------------------------------
+//! Initial Session logic
+let sessionID = sessionStorage.getItem('sessionID');
+if (!sessionID)
+{
+    sessionID = Math.random().toString(36).substring(2);
+    sessionStorage.setItem('sessionID', sessionID);
+    console.log('No sessionID for this tab. New one created:', sessionID);
+}
+else
+{
+    console.log('Existing sessionID for this tab found:', sessionID);
+}
 
-// import {io} from 'socket.io-client';
-const socket = io('http://localhost:3000'); //!Initialize socket.io client
-
-//!client side debug functions--------------------------
-
-    function printStatus() 
-    {
-        console.log(`Username: ${username}`);
-        console.log(`Is room leader: ${isRoomLeader}`);
-        console.log(`SocketID: ${socketID}`);
-        console.log(`roomID: ${roomID}`);
-        console.log(`Current video ${localRoomObj.currentVideoLink? localRoomObj.currentVideoLink : "No Video Selected" }`);
-        console.log(`Current View state: ${currentAppState}`);
-        
-    }
-//!-----------------------------------------------------
-
+// Declare socket here but initialize once DOM content loaded
+let socket;
+//----------------------------------------------------------------
 
 //? Global variables (User side)
-
 let currentAppState = 'STATE_LOADING'; // Start with a loading state perhaps
 
 let username = "";
 let socketID = "";
 let isRoomLeader = false; 
-let localRoomObj = ""; //room Obj containing inner users object, user count (int), current roomLeader object, messages object, current video link, currentTime, currentPlaybackRate
+let localRoomObj = ""; //room Obj containing inner users object, user count (int), current roomLeader object { socketID : username }, messages object, current video link (string), currentTime, currentPlaybackRate
 let usersObj = {}  
 let roomID = "";
 let playerReady = false;
@@ -37,7 +35,7 @@ let tag = document.createElement('script');
 tag.src = "https://www.youtube.com/iframe_api";
 let firstScriptTag = document.getElementsByTagName('script')[0];
 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-console.log(`tag is: ${tag}`);
+console.log(`Tag is: ${tag}`);
 
 let player;
 
@@ -56,7 +54,7 @@ function onYouTubeIframeAPIReady()
     }
 }
 
-// 2. This function creates a player object for the existing iframe
+// 3. This function creates a player object for the existing iframe
 //For the player variable to be initialzed, or re-initialized when the selected video changes
 function initializePlayer() 
 {
@@ -80,64 +78,129 @@ function initializePlayer()
     
 }
 
+
+//Applies a given state object to the YouTube player.
+//@param {object} state An object with { currentTime, videoPaused, currentPlaybackRate }
+function applyPlayerState(state) 
+{
+    if (!player || !playerReady) 
+    {
+        console.warn("Tried to apply state, but player is not ready.");
+        return;
+    }
+
+    console.log("Applying player state:", state);
+
+    player.setPlaybackRate(state.currentPlaybackRate);
+    player.seekTo(state.currentTime, true);
+
+    // Use a timeout to ensure seekTo has initiated before play/pause
+    setTimeout(() => {
+        if (state.videoPaused) 
+        {
+            if (player.getPlayerState() !== YT.PlayerState.PAUSED) 
+            {
+                player.pauseVideo();
+            }
+        } 
+        else 
+        {
+            if (player.getPlayerState() !== YT.PlayerState.PLAYING) 
+            {
+                player.playVideo();
+            }
+        }
+    }, 500);
+}
+
+
 function onPlayerReady(event) 
 {
     console.log('onPlayerReady called');
     playerReady = true;
 
-    const playerInstance = event.target // More descriptive name for the player
-
     const iframe = document.getElementById('yt-iframe');
-    if (iframe) // Double check if the iframe exists
+    if (iframe) // Double check if the iframe exists and stylize is
     {
         iframe.style.borderColor = '#FF6D00';
         iframe.style.borderWidth = '2px';
     }
 
-    // Check if the user is in a room and has the room's state
-    if (currentAppState === 'STATE_IN_ROOM' && localRoomObj && typeof localRoomObj.currentTime !== 'undefined')
+    //Determine logic based on user's role (is in room/is leader)
+    if (isRoomLeader)
     {
-        console.log(`Player ready in room. Syncing to room state: Time=${localRoomObj.currentTime}, Paused=${localRoomObj.videoPaused}, Rate=${localRoomObj.currentPlaybackRate}`);
+        // For the leader, onPlayerReady only fires AFTER a video has been set. The autoplay=1 parameter in the URL should handle starting the video.
+        // No need to explicitly call playVideo() here. The onPlayerStateChange event will fire when playback starts, and that's when the server is notified.
+        console.log("Player is ready. As leader, autoplay should handle playback.");
+    }
+    else if (!isRoomLeader && currentAppState === 'STATE_IN_ROOM' && localRoomObj) 
+    {
+        // This is a non-leader who has just joined and their player is ready, so they should ask the server for the leaders live state
+        console.log("Player is ready. Requesting initial video state from server...");
 
-        playerInstance.setPlaybackRate(localRoomObj.currentPlaybackRate);
-
-        // Important: Seek to the correct time *before* play/pause state is synced
-        playerInstance.seekTo(localRoomObj.currentTime, true) // true allows seeking ahead
-
-        // After seeking, set play/pause state. If not using enough settTmeout() delays or in the right place, then one step may interefere with the other
-        if (localRoomObj.videoPaused === true) 
+        socket.timeout(5000).emit('request-initial-sync', roomID, (err, stateObj_FromServer) => 
         {
-            setTimeout(() => { // Adding a small delay to ensure seekTo has initiated
-                if (playerInstance.getPlayerState() !== YT.PlayerState.PAUSED) 
-                {
-                    playerInstance.pauseVideo();
-                    console.log("Player paused based on room state after seek.");
-                }
-            }, 300); // Adjust delay if needed, or try without if pauseVideo() works immediately after seekTo
-        } 
-        else 
-        {
-            // If it's supposed to be playing
-            if (playerInstance.getPlayerState() !== YT.PlayerState.PLAYING) 
+            //console.log(`Err: ${JSON.stringify(err)}, stateObj_FromServer: ${JSON.stringify(stateObj_FromServer)}`);
+
+            // This is called if the server or leader doesn't respond in time (5 seconds)
+            if (err) 
             {
-                playerInstance.playVideo();
-                console.log("Player played based on room state after seek.");
+                console.error("Err: Could not complete initial auto-sync with leader:", err);
+                alert("Could not complete initial auto-sync with the room leader. They may be unresponsive.");
+                return;
             }
-        }
-    } 
+            if (stateObj_FromServer === null || typeof stateObj_FromServer === "undefined")
+            {
+                console.warn("Received 'stateFromServer' object that should originate from the leader, but it's null/undefined...");
+                return;
+            }
+
+            // ----- Otherwise state acquired, so continue ------
+            
+            // First Update localRoomObj (even if not crucial/may be redundant)
+            if (localRoomObj) 
+            {
+                localRoomObj.currentTime = stateObj_FromServer.currentTime;
+                localRoomObj.videoPaused = stateObj_FromServer.videoPaused;
+                localRoomObj.currentPlaybackRate = stateObj_FromServer.currentPlaybackRate;
+            }
+            else if (!localRoomObj)
+            {
+                console.warn("no local room obj!");
+            }
+
+            console.log("Succesfully received initial state from leader:", stateObj_FromServer);
+            console.log(`Player ready in room. Syncing to room state: Time=${stateObj_FromServer.currentTime}, Paused=${stateObj_FromServer.videoPaused}, Rate=${stateObj_FromServer.currentPlaybackRate}`);
+
+            setTimeout(() => 
+            {
+                player.seekTo(stateObj_FromServer.currentTime, true);
+                player.setPlaybackRate(stateObj_FromServer.currentPlaybackRate);
+
+                if (stateObj_FromServer.videoPaused) {
+                    if (player.getPlayerState() !== YT.PlayerState.PAUSED) {
+                        player.pauseVideo();
+                    }
+                } 
+                else {
+                    if (player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                        player.playVideo();
+                    }
+                }
+            }, 200); // Small delay to ensure seekTo has initiated //! try removing this set time out and test if needed
+
+        });
+    }
     else 
     {
-        // Fallback: If not in a room state or localRoomObj isn't ready (shouldn't happen if flow is correct),
-        // or if this is the very first video load before joining any room (not your current app flow).
-        console.log('Player ready, but not in a synced room state or localRoomObj not ready. Defaulting to playVideo.');
+        // Fallback for unexpected state
+        console.log('Player is ready, but not in a room. Defaulting to play video.');
         playerInstance.playVideo();
     }
-
-    console.log('Player is ready and initial state (should be) synced.');
     
 }
 
- //-1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 4: video cued
+//-1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 4: video cued
 function onPlayerStateChange(event)
 {                       
     console.log('Player state changed to:', event.data);
@@ -157,13 +220,21 @@ function onPlayerStateChange(event)
     
 }
 
-// Emits to to server when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2;
+// Emits to to server when user changes the playback rate. Rate = 0.25 | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 1.75 | 2;
+// ALso takes the opportunity to trigger a sync/update for the current video time
 function onPlayerPlaybackRateChange(event) 
 {
     if (isRoomLeader) 
     {
+        // First re-sync time
+        const currentTime = player.getCurrentTime();
+        console.log('Syncing video time for non-leaders');
+        socket.emit('set-videoTime', {currentTime, roomID});
+
+        // Then set playback rate
         console.log('Playback rate changed to:', event.data);  
         socket.emit('set-playbackRate', {playbackRate_eventData: event.data, roomID});
+
     }
 }
 
@@ -176,20 +247,23 @@ function onPlayerError(event)
 {                             
     console.log('Error occurred:', event.data);
     window.alert('Error');
+    //todo improve specificity and presentation
 }
 // ?End of YT api setup (global scope)
-//--------------------------------------------------------------------------------------------------------------------//
+//?==================================================================================================================//
 
 
-
-//?--------------------------------------------------------------------------------------------------------------------//
-document.addEventListener('DOMContentLoaded', () => {
-    // initial call to set up UI
+document.addEventListener('DOMContentLoaded', () => 
+{
+    
+    //! Initialize socket here as the first step
+    socket = io('http://localhost:3000', {auth: {sessionID: sessionID}});
+    
+    //! Initial call to render UI
     updateAppView(); // This will render the initial state (e.g., loading or username prompt)
     
 
-    //?State based rendering functions
-    //--------------------------------------------------------------------------------------------------------------------//
+    //? ======================== State based rendering functions =============================//
 
     function updateAppView() 
     {
@@ -317,12 +391,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Player state (seek, pause, etc.) will be handled by socket events or onPlayerReady
     }
-    //? --- End of Application State Management & View Functions ---
+    //? ----------- End of Application State Management & View Functions -----------------
 
 
     
     
-    //?------------------ DOM Event Handler Functions --------------------------------------------------------------//
+    //? ============================= DOM Event Handler Functions =====================================//
     function handleUsernameSubmit(event) 
     {
         event.preventDefault();
@@ -416,7 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-
+    // Triggered when user presses "leave room"
     function handleLeaveRoom() 
     {
         if (localRoomObj && roomID) 
@@ -446,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
 
-    //? ------ Utility Functions (renderUsersList, setVideo, verifyLink) ----------------------------------------//
+    //? ================ Utility Functions (renderUsersList, setVideo, verifyLink) ===================//
     function renderUsersList() 
     {
         if (currentAppState = 'STATE_IN_ROOM')
@@ -598,8 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    //? Socket Event Functions
-    //--------------------------------------------------------------------------------------
+    //? ======================== Socket Event Functions ==================================
     socket.on('on-connection', (socketID_fromServer) => 
     { 
         console.log(`You have ID: ${socketID_fromServer} and have succesfully connected! Your username is not set yet`);
@@ -657,27 +730,42 @@ document.addEventListener('DOMContentLoaded', () => {
     
     });
 
-    socket.on('videoTime-UpdateRequest', () => 
+    socket.on('get-current-video-state', (callbackToServer) => 
     {
-        console.log(`videoTime-UpdateRequest triggered by server as a new person has joined`);
-        if (playerReady && player && localRoomObj)
+        console.log("Leader received 'get-current-video-state' event!");
+        console.log(`Server is requesting my current video state. My status: isRoomLeader = ${isRoomLeader}, playerReady = ${playerReady}`);
+        
+        // Check initial conditions first
+        if (isRoomLeader && playerReady && player && typeof player.getPlayerState === 'function') 
         {
-           
-            //Update local copy of room object first (not particularly necessary/useful but no impact on function or performance)
+            // Update local copy of room object first 
+            // Not particularly necessary/useful but no impact on function or performance)
             localRoomObj.currentTime = Math.floor(player.getCurrentTime()); 
             
-            let currentTime = Math.floor(player.getCurrentTime()); 
-            socket.emit('currentVideoTime-fromLeader', {roomID, currentTime});
-           
-            console.log("Successfully emitted current time to server");
-        }
+            // Get the raw player state number (e.g., 1 for playing, 2 for paused);
+            const rawPlayerState = player.getPlayerState();
+
+            // Determine if paused without relying on YT.PlayerState constant
+            // Any state that isn't exactly 1 (PLAYING) can be considered "not playing"
+            const isPaused = (rawPlayerState !== 1);
+
+            const currentState_fromLeader = {
+                currentTime: Math.floor(player.getCurrentTime() || 0),  // Default to start of the video if current time not available
+                videoPaused: isPaused, 
+                currentPlaybackRate: player.getPlaybackRate() || 1  // Default to 1.0x playback speed as backup
+            };
+            
+            console.log(`As leader, I'm sending the object in the callback: ${currentState_fromLeader}}`);
+            callbackToServer(currentState_fromLeader); // Success, finish callback back to server with the prepared object
+        } 
         else 
         {
-            console.log(`(But there is no video playing or the video player could not be hooked onto)...`);
+            console.log("Failed to provide state. Passing null to the callback.");
+            callbackToServer(null);
         }
     });
     
-
+    
     socket.on('room-join-fail', () => 
     {
         console.log(`Room join failed.`);
@@ -793,12 +881,13 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log(`Error from server: ${errorMessage}`);
         alert(errorMessage); // Optionally show an alert to the user
         
-        // Todo: more graceful error display than alert()
+        // Todo: more graceful error display than using pop-up alert()
         // Potentially a STATE_ERROR and renderErrorView()
     });
 
 
-    //? ----------- Video Socket Functions ------------
+
+    //? ========================= Video Socket Functions ===================================
 
     // Receiving and handling video player updates from room leaders 
     // Interactions are to be done through Youtube API, once a valid youtube video link is loaded
@@ -818,12 +907,17 @@ document.addEventListener('DOMContentLoaded', () => {
     {
         if (currentAppState === 'STATE_IN_ROOM' && player && player.seekTo) 
         {
-            player.seekTo(time_fromServer, true); // true for allowSeekAhead
-            console.log(`Playback time updated to: ${time_fromServer} from server.`); 
+            // Only call player.seekTo if there is a significant difference (over 2 seconds)
+            if (Math.abs(player.getCurrentTime() - time_fromServer) > 2)
+            {
+                player.seekTo(time_fromServer, true); // true for allowSeekAhead
+                console.log(`Playback time updated to: ${time_fromServer} from server.`); 
+
+            }
         }
         else 
         {
-            console.warn("Issue when receiving/setting videoTime-set request from server");
+            console.warn("Issue receiving/setting videoTime-set from server");
         }
     });
 
@@ -853,7 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('playbackRate-set', (rate_fromServer) => 
     {
-        console.log('playback rate set by another user');
+        console.log('playback rate changed by leader');
         if (currentAppState === 'STATE_IN_ROOM' && player && player.setPlaybackRate) 
         {
             player.setPlaybackRate(rate_fromServer);
@@ -861,6 +955,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     //--------------------------------------------------------------------------------------
 
-    
+}) // END OF DOM-CONTENT-LOADED
 
-})
+
+
+//* --------client side debug function-------------
+function printStatus() 
+{
+    console.log(`Username: ${username}`);
+    console.log(`Is room leader: ${isRoomLeader}`);
+    console.log(`SocketID: ${socketID}`);
+    console.log(`roomID: ${roomID}`);
+    console.log(`Current video ${localRoomObj.currentVideoLink? localRoomObj.currentVideoLink : "No Video Selected" }`);
+    console.log(`Current View state: ${currentAppState}`);
+    console.log(`Player Ready: ${playerReady}`);
+}

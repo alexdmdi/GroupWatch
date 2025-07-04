@@ -1,16 +1,19 @@
-// LAYOUT:
-// 1) Express serves the static HTML file that includes the client-side JavaScript for Socket.IO (the stuff in public folder in this case)
-// 2) When the HTML file is loaded in the browser, the client-side JavaScript connects to the server via WebSocket using Socket.IO
-// 3) Socket.IO handles real-time communication, listening for emits events between the server and connected clients
-// 4) The server side socket listens for various things such as messages from clients, and it also broadcasts/emits to clients/rooms (each room has a uniqueID)
-// --------------------------------------------------------------------------------------------------------
+//! BASIC OVERVIEW:
+// * Express serves the HTML/JS/CSS files in '/public' to each client
+// * When the HTML file is loaded in the browser, the client-side JavaScript connects to the server via WebSocket using Socket.IO
+// * Youtube API: Initialized client side for the embedded iframes when inside a room
+// * Socket.IO handles real-time communication, listening for emits events between the server and connected clients
+// * The server side socket listens for various things such as messages from clients, and it also broadcasts/emits to clients/rooms (each room has a uniqueID)
+// * Global objects: 
+//?   1) rooms: composed of individual room objects, each containing a nested object for currently joined users, room leader, user count, and data about the current video
+//?   2) users: composed of all users who have connected and chosen a username
 
-//Dev Notes
-//---------------------------------------------------------------------------------------------------------
-//io.to(roomID).emit()     - Sends to everyone in the room including the sender
-//socket.to(roomID).emit() - Sends to everyone in the room except the sender
-//io.to(roomLeaderSocketID).emit('foobar', {data}) - Sends to the room leader only based on socketID
+//! Dev Notes
+// * io.to(roomID).emit()     - Sends to everyone in the room including the sender
+// * socket.to(roomID).emit() - Sends to everyone in the room except the sender
+// * io.to(roomLeaderSocketID).emit('foobar', {data}) - Sends to the room leader only based on socketID
 
+//*-------------------------------------------------------------------------------------------------------------------*/
 
 "use strict";
 
@@ -31,16 +34,19 @@ app.get(`/`, (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
 })
 
-// Global Variables, initialized as empty
+// Global Variables
 //------------------------------------------------------------------------------------
 const rooms = {}; // Room-specific global object containing data and more object(s)
 const users = {}; // Global list of all users, expected format is {socketID : username} //!Potential format {"socketID" : [username, true/false]} to keep track if a user is in a room or not
+
 const videoTimeUpdateRateLimit = {}; // Global, to be used for ratelimiting. Should be integrated with setvideo-time and perhaps other event handlers?
 const MAX_ROOM_SIZE = 20;
+const sessions = {}; // Maps sessionID -> socket.id
+
 //------------------------------------------------------------------------------------
 
 
-//Helper function that checks if a user is already a member of any room. Used in 'create-room' and 'join-room'
+//Helper function that checks if a user is already a member of any room.
 //@param {string} socketID The socket ID of the user to check.
 //@returns {string|null} The ID of the room the user is in, or null if they are not in any room.
 function getUserRoomID(socketID) 
@@ -70,7 +76,7 @@ function getUserRoomID(socketID)
             // - Emitting 'update-users-list' and 'user-left' to the room
             // - Leaving the socket.io room
             // - Deleting the room if it becomes empty
-            // - Logging details about room changes
+            // - Logging room changes
 function handleUserLeavingRoom(socket, roomID) 
 {
       
@@ -151,7 +157,38 @@ function handleUserLeavingRoom(socket, roomID)
 
 }; // End of handleUserLeavingRoom helper function
 
-//-----------------------------------------------------------------------------------------------
+
+
+// Checks if a user's session is already associated with any room.
+//@param {string} sessionID The session ID of the user to check.
+// @returns {string|null} The ID of the room the user is in, or null.
+function isSessionInAnyRoom(sessionID) 
+{
+  const currentSocketID = sessions[sessionID];
+  if (!currentSocketID) return null;
+  // Reuse your existing helper function!
+  return getUserRoomID(currentSocketID);
+}
+
+// SocketIO Middleware to help work with/track sessionIDs
+io.use((socket, next) => 
+{
+  const sessionID = socket.handshake.auth.sessionID;
+  if (!sessionID)
+  {
+    return next(new Error("invalid sessionID")); // Shouldn't happen based on the client side logic, but keep as a safeguard
+  }
+  // Attach the sessionID to the socket object for later use
+  socket.sessionID = sessionID;
+  
+  // Map the persistent sessionID to the ephemeral socket.id
+  sessions[sessionID] = socket.id;
+  
+  next();
+
+})
+
+//?---------------------------------io.on('connection') block--------------------------------------------------
 // Handles all socket connection requests from web clients
 io.on('connection', (socket) => 
 {
@@ -159,7 +196,8 @@ io.on('connection', (socket) =>
   console.log(`New connection with ID: ${socket.id}`); //logs server side
   io.to(socket.id).emit('on-connection', socket.id); // Send only the socket ID to the client
   
-  // Handles a new user setting their username //! make more robust with uniqueness? or perhaps not needed if unique background ID handles it (currently socket.id's)
+  // todo Enforce uniqueness? Maybe unrequired if unique background ID handles it (currently socket.id's)
+  // Handles a new user setting their username 
   socket.on('new-user', (username) => 
   {
     if (username && username.trim() !== "" && typeof username === "string")
@@ -177,11 +215,11 @@ io.on('connection', (socket) =>
   {
     const socketID = socket.id;
 
-    // Verify if the user is already in a room and prevent their request
-    const existingRoom = getUserRoomID(socketID);
+    // Verify if the user is already in a room and deny their request
+    const existingRoom = isSessionInAnyRoom(socket.sessionID);
     if (existingRoom) 
     {
-      console.log(`User ${username} with ID ${socketID} tried to create a room but is already in room ${existingRoom}`);
+      console.log(`User ${username} with session ${socket.sessionID} tried to create a room but is already in room ${existingRoom}`);
       socket.emit('error', `You are already in room ${existingRoom}. Please leave that room before creating a new one.`);
       return; // stop the create-room block here
     }
@@ -197,7 +235,7 @@ io.on('connection', (socket) =>
         joined_users: {},
         userCount: 1,
         roomLeader:  {},         //Initializes as empty; should be form {socketID : username} and there should only be 1 room leader at a time, but they may choose to pass the 'remote' to another joined user
-        messages: {},            //!implement messages
+        messages: {},            //! implement?
         currentVideoLink: "",    //Initially empty
         currentTime: 0,          //Default to 0
         videoPaused: false,      //Default to paused, room creator/leader can start it
@@ -239,21 +277,30 @@ io.on('connection', (socket) =>
     const req_socketID = socket.id;
     console.log(`Received join request from user: ${req_username}, with socket ID: ${req_socketID}, looking for room: ${req_roomID}`)
 
-    // Validate inputs
-    if (!req_socketID || !req_roomID || !req_username) 
+    // Check if the user's SESSION is already in a room
+    const existingRoom = isSessionInAnyRoom(socket.sessionID);
+    if (existingRoom)
     {
-      console.log(`Invalid join request: ${JSON.stringify({ req_socketID, req_roomID, req_username })}`);
+      console.log(`User ${req_username} (Session: ${socket.sessionID}) tried to join room ${req_roomID} but is already in room ${existingRoom}.`);
+      socket.emit('error', `You are already in room ${existingRoom}, please leave that room first`);
+      return; // Stop the whole function here
+    }
+    
+    // Validate existance of inputs
+    if (!req_roomID || !req_username) 
+    {
+      console.log(`Invalid join request: ${JSON.stringify({ req_roomID, req_username })}`);
       socket.emit('room-join-fail');
       return;
     }
 
-    // Verify if the user is already in a room
-    const existingRoom = getUserRoomID(req_socketID);
-    if (existingRoom)
+    // Check if the target room actually currently exists
+    if (!rooms[req_roomID])
     {
-      console.log(`User ${req_username} tried to join room ${req_roomID} but is already in room ${existingRoom}`);
-      socket.emit('error', `You are already in room ${existingRoom}, please leave that room first`);
-      return; // Stop the whole function here
+      console.log(`User ${req_username} failed to join non-existant room: ${req_roomID}`);
+      socket.emit('error', 'Room does not exist.');
+      socket.emit('room-join-fail');
+      return;
     }
 
     // Enforce room size limit
@@ -266,68 +313,85 @@ io.on('connection', (socket) =>
       return;
     }
       
-    // Check if room exists
-    if (rooms.hasOwnProperty(req_roomID)) 
-    {
-      console.log(`User ${req_username} is joining room ${req_roomID}`);
-          
-      // Add user to the respective room objects inner user object
-      rooms[req_roomID].joined_users[req_socketID] = req_username; 
-          
-      // Increment user count
-      rooms[req_roomID].userCount++;
-
-      // Join the socket to the room - order matters here, should occur before emitting updates to clients
-      socket.join(req_roomID);
-          
-      // Notify all clients in the room that a new user has joined
-      socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
-      io.to(req_roomID).emit('message', `${req_username} has joined!`)
-          
-      // Send the updated users list to all users in the room
-      console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
-      io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
-
-      //! Ask the current room leader for the current video time if available
-      //! Then trigger 'videoTime-UpdateRequest' only for the room leader client
-       console.log(`Requesting the current playback time from room leader for room ${req_roomID}`);
-       io.to(Object.keys(rooms[req_roomID].roomLeader)[0]).emit('videoTime-UpdateRequest'); //! remove these once fixed/redone
-          
-      //? Server side logs
-      console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
-      console.table(rooms);
-    
-    }
-    else 
-    {
-        console.log(`Request to join failed, room with ID ${req_roomID} does not exist`);
-        socket.emit('room-join-fail');
-    }
-
-  }); 
-
-
-  socket.on('currentVideoTime-fromLeader', ({roomID : roomID_fromLeader, currentTime : currentTime_fromLeader }) => {
-    const socketID_fromLeader = socket.id;
-    
-    // Verify that the incoming socketID really is the current room leader, then set the current time
-    if (rooms[roomID_fromLeader] && rooms[roomID_fromLeader].roomLeader[socketID_fromLeader]) 
-    {
-      rooms[roomID_fromLeader].currentTime = currentTime_fromLeader;
-      console.log(`Success - Server side currentTime value updated to ${currentTime_fromLeader} for room: ${roomID_fromLeader} based on the data pulled from the leader`);
-       
-      // + 1 (seconds) at the end, to make up for the slight typical buffer delay which should improve true real-time synchronization
-      setTimeout(() => {
-        socket.to(roomID_fromLeader).emit('videoTime-set', rooms[roomID_fromLeader].currentTime + 1);
-        socket.to(roomID_fromLeader).emit('message', "*Syncing Room*");
-      }, 1000); 
-    }
-    else 
-    {
-      console.log(`Issue: currentVideoTime-FromLeader attempt failed, the incoming ID does not correspond to the current room leader (room: ${roomID})`)
-    }
+    // If all checks pass, proceed with joining
+    //-------------------------------------------------------------------
+    console.log(`User ${req_username} is joining room ${req_roomID}`);
+        
+    // Add user to the respective room objects inner user object
+    rooms[req_roomID].joined_users[req_socketID] = req_username; 
+        
+    // Increment user count
+    rooms[req_roomID].userCount++;
       
-    });
+    // Join the socket to the room - order matters here, should occur before emitting updates to clients
+    socket.join(req_roomID);
+        
+    // Notify all clients in the room that a new user has joined
+    socket.emit('joined-room', {roomID_fromServer: req_roomID, roomObj_fromServer: rooms[req_roomID]});
+    io.to(req_roomID).emit('message', `${req_username} has joined!`)
+        
+    // Send the updated users list to all users in the room
+    console.log(`Emitting updated users list for room ${req_roomID}:`, rooms[req_roomID].joined_users);
+    io.to(req_roomID).emit('update-users-list', { usersInRoom_fromServer: rooms[req_roomID].joined_users });
+          
+    // Server side logs
+    console.log(`Updated room: ${JSON.stringify(rooms[req_roomID])}`);
+    console.table(rooms);
+
+  }); // End of io.on('join-room')
+  
+  
+  socket.on('request-initial-sync', (roomID, callbackToNewUser) => 
+  {
+    console.log(`User ${socket.id} is requesting sync for room ${roomID}`)
+
+    // Proceed if the room exists and has a room leader 
+    if (rooms[roomID] && rooms[roomID].roomLeader) 
+    {
+      // Grab leader ID for the room
+      const leaderID = Object.keys(rooms[roomID].roomLeader)[0];
+
+      if (!leaderID) 
+      {
+          return callbackToNewUser({ error: "No leader found in the room." });
+      }
+
+      console.log(`Forwarding sync request to leader: ${leaderID}`);
+      const leaderSocket = io.sockets.sockets.get(leaderID);
+
+      if (!leaderSocket) 
+      {
+        // handle error
+        return callbackToNewUser({ error: "Room leader could not be found." });
+      }
+      
+      // Forward the request to the leader with a 4 sec timeout
+      leaderSocket.timeout(4000).emit('get-current-video-state', (err, response_fromLeader) => 
+      {
+        console.log(`Received response from leader: ${JSON.stringify(response_fromLeader)}`);
+
+        if (err) 
+        {
+            console.log(`socketIO err triggered in callback for 'get-current-video-state' for room ${roomID}`);
+            return callbackToNewUser("Error: Leader unresponsive or failed.");
+        }
+        else if (!response_fromLeader)
+        {
+            return callbackToNewUser("Received empty or invalid state");
+        }
+        else if (response_fromLeader)
+        {
+            // Success: received the state object from the leader (defined as 'currentState_fromLeader' on their side)
+            console.log(`Sending state from leader to the new joiner.`);
+            callbackToNewUser(response_fromLeader);
+        }
+      });
+    } 
+    else 
+    {
+      callbackToNewUser("error: The requested room does not exist.");
+    }
+  });
 
 
   // Handles when the room leader wants to give leader status to another user in the room
@@ -369,7 +433,7 @@ io.on('connection', (socket) =>
 
 
   // Handles receiving then sending messages
-  socket.on('sendMessage', ({message: message, username: username_fromClient, roomID: roomID_fromClient}) => 
+  socket.on('sendMessage', ({message : message, username : username_fromClient, roomID : roomID_fromClient}) => 
   {
     // Checks if the input string is not valid, or if the room does not exist, or if the user is not currently joined in the provided room using their socketID (which is the key/properties in the inner joined_users object)
     // If any of those things are the case, then the request fails resulting in an error message which is logged server-side and sent to the client as well
@@ -388,9 +452,9 @@ io.on('connection', (socket) =>
 
 
   // Handles when user sets the current video playing with verifications for the room ID and room leader status (currently based on socketID)
-  socket.on('videoLink-set', ({roomID : roomID_fromClient, verifiedLink: videoLink_fromClient}) => 
+  socket.on('videoLink-set', ({roomID : roomID_fromClient, verifiedLink : videoLink_fromClient}) => 
   {
-    if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id])
+    if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id] && typeof videoLink_fromClient === "string")
     {
       rooms[roomID_fromClient].currentVideoLink = videoLink_fromClient;
       rooms[roomID_fromClient].currentTime = 0; // Reset time when a new video is set
@@ -399,16 +463,16 @@ io.on('connection', (socket) =>
     }
     else 
     {
-      // User is NOT a leader, or room doesn't exist, or roomLeader object is missing
-      socket.emit('error', `Issue: You tried to set the link to ${videoLink_fromClient} but either you are not a room leader or there is an issue with the server data`)
-      console.log(`Unauthorized videoLink-set attempt by ${users[socket.id] || socket.id} for room ${roomID_fromClient}`);
+      // User is NOT a leader || room doesn't exist || roomLeader object is missing || user bypassed client-side checks and sent a non-string input
+      socket.emit('error', `Issue: You tried to set the link to ${videoLink_fromClient} but either you are not a room leader, or there is a server side issue, or you did not provide a string.`)
+      console.log(`Unauthorized/Failed videoLink-set attempt by ${users[socket.id] || socket.id} for room ${roomID_fromClient}`);
     }
 
   });
 
 
   // Handles when user changes video time. Implements rate limiting involving the global 'videoTimeUpdateRateLimit' object, with verifications for the room ID and room leader status (currently based on socketID)
-  socket.on('set-videoTime', ({currentTime: time_fromClient, roomID: roomID_fromClient}) => 
+  socket.on('set-videoTime', ({currentTime : time_fromClient, roomID : roomID_fromClient}) => 
   {
     if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader[socket.id])
     {
@@ -458,7 +522,7 @@ io.on('connection', (socket) =>
   });
 
   // Handles when user pauses the current video playing, with verifications for the room ID and room leader status (currently based on socketID)
-  socket.on('pause-video', ({pause_message : pause_message, roomID: roomID_fromClient}) => 
+  socket.on('pause-video', ({pause_message : pause_message, roomID : roomID_fromClient}) => 
   {
     if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id])
     {
@@ -476,8 +540,9 @@ io.on('connection', (socket) =>
       
   });
 
-  // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 1 | 1.5 | 2, with verifications for the room ID and room leader status (currently based on socketID)
-  socket.on('set-playbackRate', ({playbackRate_eventData: playbackRate_fromClient, roomID : roomID_fromClient}) => 
+  // Handles when user changes the playback rate. Rate = 0.25 | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 1.75 | 2
+  // With verifications for the room ID and room leader status (based on socketID)
+  socket.on('set-playbackRate', ({playbackRate_eventData : playbackRate_fromClient, roomID : roomID_fromClient}) => 
   {
     const allowedRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
     if (rooms[roomID_fromClient] && rooms[roomID_fromClient].roomLeader && rooms[roomID_fromClient].roomLeader[socket.id] && allowedRates.includes(playbackRate_fromClient))
@@ -546,6 +611,13 @@ io.on('connection', (socket) =>
       delete users[socket.id];
     }
 
+    // Also remove their session mapping
+    if (socket.sessionID) 
+    {
+        delete sessions[socket.sessionID];
+        console.log(`Session ${socket.sessionID} mapping removed.`);
+    }
+
     // Finalizing log messages for the disconnection
     let logMessage = `User ${disconnectedUsername} (Socket ID: ${socket.id}) has fully disconnected`;
     if (roomID_ToLeave) 
@@ -555,20 +627,21 @@ io.on('connection', (socket) =>
     logMessage += `.`;
     console.log(logMessage);
 
-    console.log(`There are currently ${Object.keys(users).length} global users: ${JSON.stringify(users)}`); //logs serverside
+    console.log(`There are currently ${Object.keys(users).length} global users who have chosen a username: ${JSON.stringify(users)}`); //logs serverside
 
     // Note: If the user wasn't in any room, the 'rooms' object wouldn't have been touched by handleUserLeavingRoom.
-    // If they were, handleUserLeavingRoom already called console.table(rooms).
-    // So this runs only if no room was affected, as handleUserLeavingRoom would have done it
+    // If they were, handleUserLeavingRoom already called console.table(rooms). So this runs only if no room was affected, as handleUserLeavingRoom would have done it
     if (!roomID_ToLeave) 
     { 
       console.table(rooms);
     }
 
+
   }); //end of handling disconnect
 
   
-});
+}); 
+//? --------------------------------- End of io.on('connection') block ---------------------------------------
 
 //! Only for dev environment
 const PORT = process.env.PORT || 3000; // Sets port value to 'PORT" if it is avaialble otherwise defaults to 3000. The server then starts listening for incoming connections on that port.
