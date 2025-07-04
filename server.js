@@ -368,21 +368,21 @@ io.on('connection', (socket) =>
       // Forward the request to the leader with a 4 sec timeout
       leaderSocket.timeout(4000).emit('get-current-video-state', (err, response_fromLeader) => 
       {
-        console.log(`Received response from leader: ${JSON.stringify(response_fromLeader)}`);
-
         if (err) 
         {
-            console.log(`socketIO err triggered in callback for 'get-current-video-state' for room ${roomID}`);
-            return callbackToNewUser("Error: Leader unresponsive or failed.");
+            // If the leader client sent an error OR timed out, forward the error.  
+            console.log(`socketIO err occured for the callback for 'get-current-video-state'. Err: ${err}, Room: ${roomID}`);
+            return callbackToNewUser("Error: The room leader did not respond in time.");
         }
         else if (!response_fromLeader)
         {
-            return callbackToNewUser("Received empty or invalid state");
+            return callbackToNewUser("Received state, but it's null/undefined/invalid");
         }
-        else if (response_fromLeader)
+        else if (response_fromLeader && typeof response_fromLeader === "object")
         {
             // Success: received the state object from the leader (defined as 'currentState_fromLeader' on their side)
-            console.log(`Sending state from leader to the new joiner.`);
+            console.log(`Received response from leader: ${JSON.stringify(response_fromLeader)}`);
+            console.log(`Sending state to the new joiner through callback.`);
             callbackToNewUser(response_fromLeader);
         }
       });
