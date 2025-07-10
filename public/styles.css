@@ -14,7 +14,7 @@ body {
     -o-background-size: cover;
     background-size: cover;
     background: rgb(2,0,36);
-    background: linear-gradient(0deg, rgba(2,0,36,1) 0%, rgba(5,5,69,1) 17%, rgb(9, 149, 177) 100%);
+    background: linear-gradient(0deg, rgb(12, 11, 15) 0%, rgba(5,5,69,1) 17%, rgb(92, 64, 119) 100%);
 }
 
 #app-container {
