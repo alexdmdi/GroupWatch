@@ -1,9 +1,9 @@
 //! BASIC OVERVIEW:
 // * Express serves the HTML/JS/CSS files in '/public' to each client
-// * When the HTML file is loaded in the browser, the client-side JavaScript connects to the server via WebSocket using Socket.IO
-// * Youtube API: Initialized client side for the embedded iframes when inside a room
+// * When the HTML file is loaded in the browser, the client-side JavaScript (index.js) communicates with the server via WebSocket using Socket.IO events (First step: setting username)
+// * Youtube API: Initialized client side for the embedded iframe (Youtube Player) when in a room
 // * Socket.IO handles real-time communication, listening for emits events between the server and connected clients
-// * The server side socket listens for various things such as messages from clients, and it also broadcasts/emits to clients/rooms (each room has a uniqueID)
+// * The server side socket listens for various events such as chat messages from clients, and it broadcasts/emits back to clients/rooms as required (each room has a uniqueID)
 // * Global objects: 
 //?   1) rooms: composed of individual room objects, each containing a nested object for currently joined users, room leader, user count, and data about the current video
 //?   2) users: composed of all users who have connected and chosen a username
@@ -12,19 +12,33 @@
 // * io.to(roomID).emit()     - Sends to everyone in the room including the sender
 // * socket.to(roomID).emit() - Sends to everyone in the room except the sender
 // * io.to(roomLeaderSocketID).emit('foobar', {data}) - Sends to the room leader only based on socketID
+// * socket.join(room) to join a user to a room (by socketID)
 
 //*-------------------------------------------------------------------------------------------------------------------*/
 
 "use strict";
 
-const express = require('express');    // This imports the Express library
-const http = require('http');          // Creates an HTTP server using Express. This is needed because Socket.IO works with HTTP server to enable WebSocket communication
-const socketIo = require('socket.io'); // Imports socketIO for handling real-time bidirectional communication between the client and server, like for a live chat in this case
-const generateUniqueID = require('generate-unique-id'); // For generating unique room IDs //!(and maybe for users instead of relying on socketID?)
+const express = require('express');    // Imports the Express module, which exports a function. The 'express' variable now holds a function that can be called to to create an Express application instance/object
+const http = require('http');          // Imports Node's HTTP module, used below to create the server for Express and Socket.IO
+const socketIO = require('socket.io'); // Imports socketIO for handling real-time, bidirectional communication between the server and clients
+const generateUniqueID = require('generate-unique-id'); // Imports a utility for generating unique room IDs //!(and maybe for users instead of relying on socketID?)
 
-const app = express(); // Creates an instance of an Express application
-const server = http.createServer(app);
-const io = socketIo(server); // Initializes Socket.IO with the HTTP server. The 'io' object is used to handle WebSocket connections
+const app = express(); // Calls the imported express function to create an instance/object of an Express application, now stored in "app"
+                       // This 'app' object represents the main Express application and provides methods/properties like .listen(), .get(), .post(), and .use()
+const server = http.createServer(app); 
+const io = socketIO(server); // Initializes Socket.IO with the HTTP server. The 'io' object is used to handle WebSocket connections
+
+//* https://www.youtube.com/watch?v=ZKEqqIO7n-k
+//* May need to do this instead for CORS, 
+//* and include https://admin.socket.io in the array if doing:
+//*     const {instrument} = require("@socket.io/admin-ui") at the top as well ( and call it somewhere by doing instrument(io, { auth: false}) )
+//* then go to admin.socket.io site on ur browser, for server url put http://localhost:3000/admin and empty username or pass, should work if cors list is there
+//
+// const socketIO = require("socket.io")(3000, 
+//  cors: {
+//        origin: ["http://localhost:8080 or 3000?, "https://admin.socket.io"]}
+//   ),
+//})
 
 
 app.use(express.static(__dirname + '/public')); // For serving static files from the 'public' folder. When a request is made to the server it will look for files in this folder and serve them if they exist
@@ -144,6 +158,7 @@ function handleUserLeavingRoom(socket, roomID)
       console.log(`Updated room ${roomID} state: ${JSON.stringify(rooms[roomID])}`);
     }
 
+    console.log("Printing rooms table:");
     console.table(rooms) // Log current rooms state (server side)
     return true; // success
 
