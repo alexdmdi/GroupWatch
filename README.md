@@ -46,6 +46,7 @@ npm start
 - [socket.io](https://www.npmjs.com/package/socket.io)
 - [socket.io-client](https://www.npmjs.com/package/socket.io-client)
 - [generate-unique-id](https://www.npmjs.com/package/generate-unique-id)
+- [socket.io/admin-ui](https://www.npmjs.com/package/@socket.io/admin-ui)
 
 ### Dev Dependencies
 
@@ -61,7 +62,7 @@ npm start
 - Create a new room or join an existing one using a Room ID.
 - If you are the room leader, set a YouTube video link to start watching together.
 - Use the chat to communicate with others in the room.
-- The room leader can transfer control to another user.
+- The room leader can transfer control to another user in the room at any time. Leader status is automatically assigned to someone else when a leader leaves.
 
 ---
 
