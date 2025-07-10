@@ -20,16 +20,35 @@
 
 const express = require('express');    // Imports the Express module, which exports a function. The 'express' variable now holds a function that can be called to to create an Express application instance/object
 const http = require('http');          // Imports Node's HTTP module, used below to create the server for Express and Socket.IO
-const socketIO = require('socket.io'); // Imports socketIO for handling real-time, bidirectional communication between the server and clients
+const socketIO = require('socket.io'); // Imports SocketIO for handling real-time, bidirectional communication between the server and clients
+const { instrument } = require("@socket.io/admin-ui"); // Imports SocketIO admin UI feature
 const generateUniqueID = require('generate-unique-id'); // Imports a utility for generating unique room IDs //!(and maybe for users instead of relying on socketID?)
 
-const app = express(); // Calls the imported express function to create an instance/object of an Express application, now stored in "app"
-                       // This 'app' object represents the main Express application and provides methods/properties like .listen(), .get(), .post(), and .use()
+// Calls the imported express function to create an instance/object of an Express application, now stored in "app"
+// This 'app' object represents the main Express application and provides methods/properties like .listen(), .get(), .post(), and .use()
+const app = express(); 
+
+// Creates an HTTP server using the Express app as the request handler; this server instance is required for integrating both Express routes and Socket.IO on the same port
 const server = http.createServer(app); 
-const io = socketIO(server); // Initializes Socket.IO with the HTTP server. The 'io' object is used to handle WebSocket connections
+
+// Initializes Socket.IO with the HTTP server. The 'io' object is used to handle WebSocket connections
+// Configures CORS to allow connections from the Socket.IO Admin UI dashboard (https://admin.socket.io) for monitoring and debugging.
+const io = socketIO(server, {
+  cors: {
+    origin: ["https://admin.socket.io"],
+    credentials: true
+  }
+});
+
+// Enable the admin UI
+instrument(io, {
+  auth: false, // Anyone can access (for dev only!)
+  mode: "development"
+});
+
 
 //* https://www.youtube.com/watch?v=ZKEqqIO7n-k
-//* May need to do this instead for CORS, 
+//* May need to do this instead for CORS?, 
 //* and include https://admin.socket.io in the array if doing:
 //*     const {instrument} = require("@socket.io/admin-ui") at the top as well ( and call it somewhere by doing instrument(io, { auth: false}) )
 //* then go to admin.socket.io site on ur browser, for server url put http://localhost:3000/admin and empty username or pass, should work if cors list is there
